@@ -27,6 +27,17 @@ import {
 import vsGLSL from '../assets/shaders/vs_color.glsl?raw';
 import fsGLSL from '../assets/shaders/fs_color.glsl?raw';
 
+async function loadObjModel(modelName) {
+    const response = await fetch(`../assets/models/${modelName}.obj`);
+    if (!response.ok) {
+        console.error(`❌ Error al cargar ${modelName}.obj`);
+        return null;
+    }
+    const objText = await response.text();
+    console.log(`✅ Modelo cargado: ${modelName}.obj`);
+    return objText;
+}
+
 const scene = new Scene3D();
 
 /*
@@ -98,10 +109,22 @@ function setupScene() {
   scene.camera.setupControls();
 }
 
-function setupObjects(scene, gl, programInfo) {
+async function setupObjects(scene, gl, programInfo) {
   // Create VAOs for the different shapes
   const baseCube = new Object3D(-1);
   baseCube.prepareVAO(gl, programInfo);
+
+  // Cargar modelo del restaurante de sushi
+  console.log("🍣 Cargando restaurante de sushi...");
+  const sushiData = await loadObjModel("sushi_restaurant");
+  let sushiModel = null;
+
+  if (sushiData) {
+    sushiModel = new Object3D(-100);
+    sushiModel.prepareVAO(gl, programInfo, sushiData);
+    console.log("✅ Restaurante de sushi listo");
+  }
+
 
   /*
   // A scaled cube to use as the ground
@@ -125,11 +148,15 @@ function setupObjects(scene, gl, programInfo) {
 
   // Copy the properties of the base objects
   for (const agent of obstacles) {
-    agent.arrays = baseCube.arrays;
-    agent.bufferInfo = baseCube.bufferInfo;
-    agent.vao = baseCube.vao;
-    agent.scale = { x: 0.5, y: 0.5, z: 0.5 };
-    agent.color = [0.7, 0.7, 0.7, 1.0];
+    // Usar el modelo del restaurante SOLO en el primer obstáculo
+    if (sushiModel) {
+      console.log("🏗️ Aplicando restaurante de sushi al obstáculo:", agent.id);
+      agent.arrays = sushiModel.arrays;
+      agent.bufferInfo = sushiModel.bufferInfo;
+      agent.vao = sushiModel.vao;
+      agent.scale = { x: 0.01, y: 0.01, z: 0.01 }; // Escala pequeña - ajustar según sea necesario
+      agent.color = [0.9, 0.7, 0.5, 1.0]; // Color café/beige para el restaurante
+    } 
     scene.addObject(agent);
   }
 
@@ -174,7 +201,8 @@ function drawObject(gl, programInfo, object, viewProjectionMatrix, fract) {
 
   // Model uniforms
   let objectUniforms = {
-    u_transforms: wvpMat
+    u_transforms: wvpMat,
+    u_color: object.color || [1.0, 1.0, 1.0, 1.0]
   }
   twgl.setUniforms(programInfo, objectUniforms);
 

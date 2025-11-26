@@ -1,8 +1,6 @@
 /*
  * 3D scene for Traffic Model visualization
  * Based on the city traffic simulation
- *
- * Modified from random_agents.js
  */
 
 'use strict';
@@ -21,18 +19,47 @@ import {
     getTrafficLights, getRoads, getDestinations
 } from '../libs/api_connection_traffic.js';
 
-// Define the shader code, using GLSL 3.00
-import vsGLSL from '../assets/shaders/vs_color.glsl?raw';
-import fsGLSL from '../assets/shaders/fs_color.glsl?raw';
+// Define the shader code, using GLSL 3.00 - Phong Lighting
+import vsGLSL from '../assets/shaders/vs_phong.glsl?raw';
+import fsGLSL from '../assets/shaders/fs_phong.glsl?raw';
+
+async function loadObjModel(modelName) {
+    const response = await fetch(`../assets/models/${modelName}.obj`);
+    if (!response.ok) {
+        console.error(`❌ Error al cargar ${modelName}.obj`);
+        return null;
+    }
+    const objText = await response.text();
+    console.log(`✅ Modelo cargado: ${modelName}.obj`);
+    return objText;
+}
+
 
 const scene = new Scene3D();
 
 // Global variables
-let colorProgramInfo = undefined;
+let phongProgramInfo = undefined;
 let gl = undefined;
 const duration = 1000; // ms
 let elapsed = 0;
 let then = 0;
+
+// Lighting configuration
+const lightingConfig = {
+    // Light position (world coordinates)
+    lightPosition: [15, 20, 15],
+
+    // Ambient light (always present, no direction)
+    ambientLight: [0.3, 0.3, 0.3, 1.0],
+
+    // Diffuse light (directional, main light source)
+    diffuseLight: [1.0, 1.0, 1.0, 1.0],
+
+    // Specular light (shiny highlights)
+    specularLight: [1.0, 1.0, 1.0, 1.0]
+};
+
+
 
 
 // Main function is async to be able to make the requests
@@ -43,8 +70,8 @@ async function main() {
     twgl.resizeCanvasToDisplaySize(gl.canvas);
     gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
 
-    // Prepare the program with the shaders
-    colorProgramInfo = twgl.createProgramInfo(gl, [vsGLSL, fsGLSL]);
+    // Prepare the program with the shaders (Phong lighting)
+    phongProgramInfo = twgl.createProgramInfo(gl, [vsGLSL, fsGLSL]);
 
     // Initialize the traffic model
     await initTrafficModel();
@@ -52,6 +79,9 @@ async function main() {
     // Get all the different elements from the city
     await getCars();
     await getObstacles();
+
+
+
     await getTrafficLights();
     await getRoads();
     await getDestinations();
@@ -60,7 +90,7 @@ async function main() {
     setupScene();
 
     // Position the objects in the scene
-    setupObjects(scene, gl, colorProgramInfo);
+    setupObjects(scene, gl, phongProgramInfo);
 
     // Prepare the user interface
     setupUI();
@@ -83,10 +113,21 @@ function setupScene() {
     scene.camera.setupControls();
 }
 
-function setupObjects(scene, gl, programInfo) {
+async function setupObjects(scene, gl, programInfo) {
     // Create VAOs for the different shapes
     const baseCube = new Object3D(-1);
     baseCube.prepareVAO(gl, programInfo);
+
+    // Cargar modelo del restaurante de sushi
+    console.log("🍣 Cargando restaurante de sushi...");
+    const sushiData = await loadObjModel("sushi_restaurant");
+    let sushiModel = null;
+    
+    if (sushiData) {
+        sushiModel = new Object3D(-100);
+        sushiModel.prepareVAO(gl, programInfo, sushiData);
+        console.log("✅ Restaurante de sushi listo");
+    }
 
     // Add roads to the scene
     for (const road of roads) {
@@ -98,13 +139,25 @@ function setupObjects(scene, gl, programInfo) {
     }
 
     // Add obstacles to the scene
-    for (const obstacle of obstacles) {
-        obstacle.arrays = baseCube.arrays;
-        obstacle.bufferInfo = baseCube.bufferInfo;
-        obstacle.vao = baseCube.vao;
-        obstacle.scale = { x: 0.5, y: 0.5, z: 0.5 };
-        scene.addObject(obstacle);
+    for (const agent of obstacles) {
+    // Usar el modelo del restaurante SOLO en el primer obstáculo
+    if (agent.id === obstacles[1].id && sushiModel) {
+      console.log("🏗️ Aplicando restaurante de sushi al obstáculo:", agent.id);
+      agent.arrays = sushiModel.arrays;
+      agent.bufferInfo = sushiModel.bufferInfo;
+      agent.vao = sushiModel.vao;
+      agent.scale = { x: 0.01, y: 0.01, z: 0.01 }; // Escala pequeña - ajustar según sea necesario
+      agent.color = [0.9, 0.7, 0.5, 1.0]; // Color café/beige para el restaurante
+    } else {
+      // El resto siguen siendo cubos
+      agent.arrays = baseCube.arrays;
+      agent.bufferInfo = baseCube.bufferInfo;
+      agent.vao = baseCube.vao;
+      agent.scale = { x: 0.5, y: 0.5, z: 0.5 };
+      agent.color = [0.7, 0.7, 0.7, 1.0];
     }
+    scene.addObject(agent);
+  }
 
     // Add traffic lights to the scene
     for (const light of trafficLights) {
@@ -134,7 +187,7 @@ function setupObjects(scene, gl, programInfo) {
     }
 }
 
-// Draw an object with its corresponding transformations
+// Draw an object with its corresponding transformations (Phong lighting)
 function drawObject(gl, programInfo, object, viewProjectionMatrix, fract) {
     // Prepare the vector for translation and scale
     let v3_tra = object.posArray;
@@ -147,24 +200,49 @@ function drawObject(gl, programInfo, object, viewProjectionMatrix, fract) {
     const rotZMat = M4.rotationZ(object.rotRad.z);
     const traMat = M4.translation(v3_tra);
 
-    // Create the composite matrix with all transformations
-    let transforms = M4.identity();
-    transforms = M4.multiply(scaMat, transforms);
-    transforms = M4.multiply(rotXMat, transforms);
-    transforms = M4.multiply(rotYMat, transforms);
-    transforms = M4.multiply(rotZMat, transforms);
-    transforms = M4.multiply(traMat, transforms);
+    // Create the composite world matrix (local to world space)
+    let worldMatrix = M4.identity();
+    worldMatrix = M4.multiply(scaMat, worldMatrix);
+    worldMatrix = M4.multiply(rotXMat, worldMatrix);
+    worldMatrix = M4.multiply(rotYMat, worldMatrix);
+    worldMatrix = M4.multiply(rotZMat, worldMatrix);
+    worldMatrix = M4.multiply(traMat, worldMatrix);
 
-    object.matrix = transforms;
+    object.matrix = worldMatrix;
 
-    // Apply the projection to the final matrix
-    const wvpMat = M4.multiply(viewProjectionMatrix, transforms);
+    // Calculate world-view-projection matrix
+    const worldViewProjection = M4.multiply(viewProjectionMatrix, worldMatrix);
 
-    // Model uniforms
+    // Calculate inverse transpose for normals
+    const worldInverseTransform = M4.transpose(M4.inverse(worldMatrix));
+
+    // Get material properties (from MTL or defaults)
+    const ambientColor = object.ambientColor || [0.2, 0.2, 0.2, 1.0];
+    const diffuseColor = object.diffuseColor || object.color || [0.8, 0.8, 0.8, 1.0];
+    const specularColor = object.specularColor || [1.0, 1.0, 1.0, 1.0];
+    const shininess = object.shininess || 100;
+
+    // Phong lighting uniforms
     let objectUniforms = {
-        u_transforms: wvpMat,
-        u_color: object.color
-    }
+        // Matrices
+        u_world: worldMatrix,
+        u_worldInverseTransform: worldInverseTransform,
+        u_worldViewProjection: worldViewProjection,
+
+        // Light properties (scene-level)
+        u_lightWorldPosition: lightingConfig.lightPosition,
+        u_viewWorldPosition: scene.camera.posArray,
+        u_ambientLight: lightingConfig.ambientLight,
+        u_diffuseLight: lightingConfig.diffuseLight,
+        u_specularLight: lightingConfig.specularLight,
+
+        // Material properties (object-level)
+        u_ambientColor: ambientColor,
+        u_diffuseColor: diffuseColor,
+        u_specularColor: specularColor,
+        u_shininess: shininess
+    };
+
     twgl.setUniforms(programInfo, objectUniforms);
 
     gl.bindVertexArray(object.vao);
@@ -191,10 +269,10 @@ async function drawScene() {
     scene.camera.checkKeys();
     const viewProjectionMatrix = setupViewProjection(gl);
 
-    // Draw the objects
-    gl.useProgram(colorProgramInfo.program);
+    // Draw the objects with Phong lighting
+    gl.useProgram(phongProgramInfo.program);
     for (let object of scene.objects) {
-        drawObject(gl, colorProgramInfo, object, viewProjectionMatrix, fract);
+        drawObject(gl, phongProgramInfo, object, viewProjectionMatrix, fract);
     }
 
     // Update the scene after the elapsed duration
@@ -225,10 +303,80 @@ function setupViewProjection(gl) {
     return viewProjectionMatrix;
 }
 
-// Setup UI
+// Setup UI with camera controls
 function setupUI() {
-    // Could add GUI controls for traffic simulation here
-    console.log("Traffic visualization initialized");
+    const gui = new GUI();
+
+    // Camera controls folder
+    const cameraFolder = gui.addFolder('Camera Controls');
+
+    // Camera settings object
+    const cameraSettings = {
+        distance: scene.camera.distance,
+        azimuth: scene.camera.azimuth,
+        elevation: scene.camera.elevation,
+        targetX: scene.camera.target.x,
+        targetY: scene.camera.target.y,
+        targetZ: scene.camera.target.z,
+        reset: function () {
+            // Reset to default values
+            this.distance = 30;
+            this.azimuth = 4;
+            this.elevation = 0.6;
+            this.targetX = 12;
+            this.targetY = 0;
+            this.targetZ = 12;
+            updateCamera();
+        }
+    };
+
+    // Update camera function
+    const updateCamera = () => {
+        scene.camera.distance = cameraSettings.distance;
+        scene.camera.azimuth = cameraSettings.azimuth;
+        scene.camera.elevation = cameraSettings.elevation;
+        scene.camera.target.x = cameraSettings.targetX;
+        scene.camera.target.y = cameraSettings.targetY;
+        scene.camera.target.z = cameraSettings.targetZ;
+    };
+
+    // Distance slider
+    cameraFolder.add(cameraSettings, 'distance', 5, 100, 1)
+        .name('Distance')
+        .onChange(updateCamera);
+
+    // Azimuth slider (horizontal rotation)
+    cameraFolder.add(cameraSettings, 'azimuth', 0, Math.PI * 2, 0.1)
+        .name('Azimuth (H)')
+        .onChange(updateCamera);
+
+    // Elevation slider (vertical rotation)
+    cameraFolder.add(cameraSettings, 'elevation', 0, Math.PI / 2, 0.1)
+        .name('Elevation (V)')
+        .onChange(updateCamera);
+
+    // Target position controls
+    const targetFolder = cameraFolder.addFolder('Target Position');
+
+    targetFolder.add(cameraSettings, 'targetX', 0, 24, 0.5)
+        .name('Target X')
+        .onChange(updateCamera);
+
+    targetFolder.add(cameraSettings, 'targetY', -5, 10, 0.5)
+        .name('Target Y')
+        .onChange(updateCamera);
+
+    targetFolder.add(cameraSettings, 'targetZ', 0, 24, 0.5)
+        .name('Target Z')
+        .onChange(updateCamera);
+
+    // Reset button
+    cameraFolder.add(cameraSettings, 'reset').name('Reset Camera');
+
+    // Open camera folder by default
+    cameraFolder.open();
+
+    console.log("Traffic visualization initialized with camera controls");
 }
 
 main();
