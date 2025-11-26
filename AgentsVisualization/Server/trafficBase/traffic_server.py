@@ -83,10 +83,15 @@ def getObstacles():
                 if isinstance(agent, Obstacle)
             ]
             
-            obstaclePositions = [
-                {"id": str(a.unique_id), "x": coordinate[0], "y": 1, "z": coordinate[1]}
-                for (coordinate, a) in agents
-            ]
+            obstaclePositions = []
+            for (coordinate, a) in agents:
+                obstacle_data = {
+                    "id": str(a.unique_id), 
+                    "x": coordinate[0], 
+                    "y": 1, 
+                    "z": coordinate[1]
+                }
+                obstaclePositions.append(obstacle_data)
             
             return jsonify({'positions': obstaclePositions})
         except Exception as e:
