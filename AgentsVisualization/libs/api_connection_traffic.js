@@ -53,26 +53,26 @@ async function initTrafficModel() {
  */
 async function getCars() {
     try {
-        let response = await fetch(agent_server_uri + "getAgents");
+        let response = await fetch(agent_server_uri + "getCars");
 
         if (response.ok) {
             let result = await response.json();
 
-            if (cars.length == 0) {
-                for (const car of result.positions) {
+            for (const car of result.positions) {
+                const current_car = cars.find((object3d) => object3d.id == car.id);
+
+                if (current_car != undefined) {
+                    // Coche existente: guardar posición anterior para interpolación
+                    current_car.oldPosArray = current_car.posArray;
+                    current_car.position = { x: car.x, y: car.y, z: car.z };
+                    current_car.direction = car.direction;
+                } else {
+                    // Coche nuevo: agregar al array
                     const newCar = new Object3D(car.id, [car.x, car.y, car.z]);
                     newCar['oldPosArray'] = newCar.posArray;
-                    newCar.color = [1.0, 0.0, 0.0, 1.0]; // Red color for cars
+                    newCar['direction'] = car.direction;
+                    newCar.color = [1.0, 0.0, 0.0, 1.0];
                     cars.push(newCar);
-                }
-            } else {
-                for (const car of result.positions) {
-                    const current_car = cars.find((object3d) => object3d.id == car.id);
-
-                    if (current_car != undefined) {
-                        current_car.oldPosArray = current_car.posArray;
-                        current_car.position = { x: car.x, y: car.y, z: car.z };
-                    }
                 }
             }
         }

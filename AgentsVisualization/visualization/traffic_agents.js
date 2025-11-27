@@ -57,6 +57,13 @@ const duration = 1000; // ms
 let elapsed = 0;
 let then = 0;
 
+// Global models for dynamic objects
+let baseCubeModel = null;
+
+// Arrays de modelos para rotación
+let buildingModels = [];  // sushi_restaurant, SushiMini, WatchTower
+let carModels = [];       // JapanCar, CanaryCruiser
+
 // Lighting configuration
 const lightingConfig = {
     // Ambient light (always present)
@@ -70,7 +77,7 @@ const lightingConfig = {
     },
 
     // Traffic light intensity (subtle glow)
-    trafficLightIntensity: 0.15
+    trafficLightIntensity: 0.05
 };
 
 // Build array of all lights (sun + traffic lights)
@@ -151,7 +158,7 @@ function setupScene() {
         30,             // Distance to target
         4,              // Azimut
         0.6,            // Elevation
-        [12, 0, 12],    // Target position (center of the city)
+        [10, 0, 10],    // Target position (center of the city)
         [0, 0, 0]);
     // These values are empirical.
     camera.panOffset = [0, 8, 0];
@@ -161,81 +168,194 @@ function setupScene() {
 
 async function setupObjects(scene, gl, programInfo) {
     // Create VAOs for the different shapes
-    const baseCube = new Object3D(-1);
-    baseCube.prepareVAO(gl, programInfo);
+    baseCubeModel = new Object3D(-1);
+    baseCubeModel.prepareVAO(gl, programInfo);
 
-    // Cargar materiales y modelo del restaurante de sushi
+    // Cargar modelos de edificios
     await loadMtlFile("../assets/models/sushi_restaurant.mtl");
-    const sushiData = await loadObjModel("sushi_restaurant");
-    let sushiModel = null;
+    const sushiRestData = await loadObjModel("sushi_restaurant");
 
-    if (sushiData) {
-        sushiModel = new Object3D(-100);
-        sushiModel.prepareVAO(gl, programInfo, sushiData);
+    await loadMtlFile("../assets/models/SushiMini.mtl");
+    const sushiMiniData = await loadObjModel("SushiMini");
+
+    /*
+    await loadMtlFile("../assets/models/WatchTower.mtl");
+    const watchTowerData = await loadObjModel("WatchTower");
+    */
+
+    // Cargar modelos de coches
+    await loadMtlFile("../assets/models/JapanCar.mtl");
+    const japanCarData = await loadObjModel("JapanCar");
+
+    await loadMtlFile("../assets/models/CanaryCruiser.mtl");
+    const canaryData = await loadObjModel("CanaryCruiser");
+
+    // Crear modelos de edificios
+    if (sushiRestData) {
+        let model = new Object3D(-100);
+        model.prepareVAO(gl, programInfo, sushiRestData);
+        buildingModels.push({ model, scale: { x: 0.01, y: 0.01, z: 0.01 } });
+    }
+    if (sushiMiniData) {
+        let model = new Object3D(-101);
+        model.prepareVAO(gl, programInfo, sushiMiniData);
+        buildingModels.push({ model, scale: { x: 0.01, y: 0.01, z: 0.01 } });
+    }
+    
+
+    // Crear modelos de coches
+    if (japanCarData) {
+        let model = new Object3D(-103);
+        model.prepareVAO(gl, programInfo, japanCarData);
+        carModels.push({
+            model,
+            scale: { x: 0.003, y: 0.005, z: 0.003 },
+            rotationOffset: Math.PI / 2,
+            positionOffset: { x: 0, y: 0, z: 0.4 }  
+        });
+    }
+    if (canaryData) {
+        let model = new Object3D(-104);
+        model.prepareVAO(gl, programInfo, canaryData);
+        carModels.push({
+            model,
+            scale: { x: 0.003, y: 0.005, z: 0.003 },
+            rotationOffset: 0,
+            positionOffset: { x: 0, y: 0, z: 0 }
+        });
     }
 
     // Add roads to the scene
     for (const road of roads) {
-        road.arrays = baseCube.arrays;
-        road.bufferInfo = baseCube.bufferInfo;
-        road.vao = baseCube.vao;
+        road.arrays = baseCubeModel.arrays;
+        road.bufferInfo = baseCubeModel.bufferInfo;
+        road.vao = baseCubeModel.vao;
         road.scale = { x: 0.5, y: 0.1, z: 0.5 };
         scene.addObject(road);
     }
 
-    // Add obstacles to the scene
-    for (const agent of obstacles) {
-    // Usar el modelo del restaurante SOLO en el primer obstáculo
-    if (agent.id === obstacles[0].id && sushiModel) {
-      console.log("🏗️ Aplicando restaurante de sushi al obstáculo:", agent.id);
-      agent.arrays = sushiModel.arrays;
-      agent.bufferInfo = sushiModel.bufferInfo;
-      agent.vao = sushiModel.vao;
-      agent.scale = { x: 0.01, y: 0.01, z: 0.01 };
-      agent.useVertexColor = true; // Usar colores del MTL
-    } else {
-      // El resto siguen siendo cubos
-      agent.arrays = baseCube.arrays;
-      agent.bufferInfo = baseCube.bufferInfo;
-      agent.vao = baseCube.vao;
-      agent.scale = { x: 0.5, y: 0.5, z: 0.5 };
-      agent.color = [0.7, 0.7, 0.7, 1.0];
+    // Add obstacles to the scene (rotando entre modelos de edificios)
+    for (let i = 0; i < obstacles.length; i++) {
+        const agent = obstacles[i];
+        if (buildingModels.length > 0) {
+            // Asignar modelo de edificio basado en el índice
+            const buildingData = buildingModels[i % buildingModels.length];
+            agent.arrays = buildingData.model.arrays;
+            agent.bufferInfo = buildingData.model.bufferInfo;
+            agent.vao = buildingData.model.vao;
+            agent.scale = buildingData.scale;
+            agent.useVertexColor = true;
+        } else {
+            agent.arrays = baseCubeModel.arrays;
+            agent.bufferInfo = baseCubeModel.bufferInfo;
+            agent.vao = baseCubeModel.vao;
+            agent.scale = { x: 0.5, y: 0.5, z: 0.5 };
+            agent.color = [0.7, 0.7, 0.7, 1.0];
+        }
+        scene.addObject(agent);
     }
-    scene.addObject(agent);
-  }
 
     // Add traffic lights to the scene
     for (const light of trafficLights) {
-        light.arrays = baseCube.arrays;
-        light.bufferInfo = baseCube.bufferInfo;
-        light.vao = baseCube.vao;
+        light.arrays = baseCubeModel.arrays;
+        light.bufferInfo = baseCubeModel.bufferInfo;
+        light.vao = baseCubeModel.vao;
         light.scale = { x: 0.5, y: 0.5, z: 0.5 };
         scene.addObject(light);
     }
 
     // Add destinations to the scene
     for (const dest of destinations) {
-        dest.arrays = baseCube.arrays;
-        dest.bufferInfo = baseCube.bufferInfo;
-        dest.vao = baseCube.vao;
+        dest.arrays = baseCubeModel.arrays;
+        dest.bufferInfo = baseCubeModel.bufferInfo;
+        dest.vao = baseCubeModel.vao;
         dest.scale = { x: 0.5, y: 0.3, z: 0.5 };
         scene.addObject(dest);
     }
+}
 
-    // Add cars to the scene
-    for (const car of cars) {
-        car.arrays = baseCube.arrays;
-        car.bufferInfo = baseCube.bufferInfo;
-        car.vao = baseCube.vao;
-        car.scale = { x: 0.4, y: 0.4, z: 0.4 };
+// Contador para rotar modelos de coches
+let carModelIndex = 0;
+
+// Configura un coche con el modelo correcto
+function setupCar(car) {
+    if (!car.vao) {
+        if (carModels.length > 0) {
+            // Asignar modelo de coche rotando entre los disponibles
+            const carData = carModels[carModelIndex % carModels.length];
+            car.arrays = carData.model.arrays;
+            car.bufferInfo = carData.model.bufferInfo;
+            car.vao = carData.model.vao;
+            car.scale = carData.scale;
+            car.rotationOffset = carData.rotationOffset || 0;
+            car.positionOffset = carData.positionOffset || { x: 0, y: 0, z: 0 };
+            car.useVertexColor = true;
+            carModelIndex++;
+        } else {
+            car.arrays = baseCubeModel.arrays;
+            car.bufferInfo = baseCubeModel.bufferInfo;
+            car.vao = baseCubeModel.vao;
+            car.scale = { x: 0.4, y: 0.4, z: 0.4 };
+            car.color = [1.0, 0.0, 0.0, 1.0];
+        }
         scene.addObject(car);
     }
 }
 
-// Draw an object with its corresponding transformations (Phong lighting)
-function drawObject(gl, programInfo, object, viewProjectionMatrix, lights) {
-    // Prepare the vector for translation and scale
-    let v3_tra = object.posArray;
+
+function setCarRotation(car) {
+    const offset = car.rotationOffset || 0;
+    switch (car.direction) {
+        case "Up":
+            car.rotRad = { x: 0, y: 0 + offset, z: 0 };
+            break;
+        case "Down":
+            car.rotRad = { x: 0, y: Math.PI + offset, z: 0 };
+            break;
+        case "Right":
+            car.rotRad = { x: 0, y: -Math.PI / 2 + offset, z: 0 };
+            break;
+        case "Left":
+            car.rotRad = { x: 0, y: Math.PI / 2 + offset, z: 0 };
+            break;
+        default:
+            car.rotRad = { x: 0, y: 0 + offset, z: 0 };
+    }
+}
+
+/**
+ * Linear interpolation between two values
+ */
+function lerp(a, b, t) {
+    return a + (b - a) * t;
+}
+
+
+function getInterpolatedPosition(object, fract) {
+    if (object.oldPosArray) {
+        return [
+            lerp(object.oldPosArray[0], object.posArray[0], fract),
+            lerp(object.oldPosArray[1], object.posArray[1], fract),
+            lerp(object.oldPosArray[2], object.posArray[2], fract)
+        ];
+    }
+    return object.posArray;
+}
+
+
+function drawObject(gl, programInfo, object, viewProjectionMatrix, lights, fract) {
+    
+    let v3_tra = object.oldPosArray ? getInterpolatedPosition(object, fract) : object.posArray;
+
+    
+    if (object.positionOffset) {
+        v3_tra = [
+            v3_tra[0] + object.positionOffset.x,
+            v3_tra[1] + object.positionOffset.y,
+            v3_tra[2] + object.positionOffset.z
+        ];
+    }
+
     let v3_sca = object.scaArray;
 
     // Create the individual transform matrices
@@ -308,6 +428,9 @@ async function drawScene() {
     elapsed += deltaTime;
     then = now;
 
+    // Calculate interpolation fraction (0 to 1)
+    let fract = Math.min(1.0, elapsed / duration);
+
     // Clear the canvas
     gl.clearColor(0.1, 0.1, 0.15, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -325,13 +448,18 @@ async function drawScene() {
     // Draw the objects with Phong lighting
     gl.useProgram(phongProgramInfo.program);
     for (let object of scene.objects) {
-        drawObject(gl, phongProgramInfo, object, viewProjectionMatrix, lights);
+        drawObject(gl, phongProgramInfo, object, viewProjectionMatrix, lights, fract);
     }
 
     // Update the scene after the elapsed duration
     if (elapsed >= duration) {
         elapsed = 0;
         await update();
+        // Setup new cars and update rotations
+        for (const car of cars) {
+            setupCar(car);
+            setCarRotation(car);
+        }
     }
 
     requestAnimationFrame(drawScene);
