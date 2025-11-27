@@ -11,6 +11,7 @@ import { M4 } from '../libs/3d-lib';
 import { Scene3D } from '../libs/scene3d';
 import { Object3D } from '../libs/object3d';
 import { Camera3D } from '../libs/camera3d';
+import { loadMtl } from '../libs/obj_loader';
 
 // Functions and arrays for the communication with the API
 import {
@@ -26,12 +27,24 @@ import fsGLSL from '../assets/shaders/fs_phong.glsl?raw';
 async function loadObjModel(modelName) {
     const response = await fetch(`../assets/models/${modelName}.obj`);
     if (!response.ok) {
-        console.error(`❌ Error al cargar ${modelName}.obj`);
+        console.error(` Error al cargar ${modelName}.obj`);
         return null;
     }
     const objText = await response.text();
-    console.log(`✅ Modelo cargado: ${modelName}.obj`);
+    console.log(` Modelo cargado: ${modelName}.obj`);
     return objText;
+}
+
+async function loadMtlFile(mtlPath) {
+    const response = await fetch(mtlPath);
+    if (!response.ok) {
+        console.error(` Error al cargar MTL: ${mtlPath}`);
+        return null;
+    }
+    const mtlText = await response.text();
+    loadMtl(mtlText);
+    console.log(` Materiales cargados: ${mtlPath}`);
+    return true;
 }
 
 
@@ -46,18 +59,51 @@ let then = 0;
 
 // Lighting configuration
 const lightingConfig = {
-    // Light position (world coordinates)
-    lightPosition: [15, 20, 15],
+    // Ambient light (always present)
+    ambientLight: [0.2, 0.2, 0.2, 1.0],
 
-    // Ambient light (always present, no direction)
-    ambientLight: [0.3, 0.3, 0.3, 1.0],
+    // Sun light configuration
+    sun: {
+        position: [15, 30, 15],
+        color: [1.0, 1.0, 0.9, 1.0],
+        intensity: 1.1
+    },
 
-    // Diffuse light (directional, main light source)
-    diffuseLight: [1.0, 1.0, 1.0, 1.0],
-
-    // Specular light (shiny highlights)
-    specularLight: [1.0, 1.0, 1.0, 1.0]
+    // Traffic light intensity (subtle glow)
+    trafficLightIntensity: 0.15
 };
+
+// Build array of all lights (sun + traffic lights)
+function buildLightsArray() {
+    const positions = [];
+    const colors = [];
+    const intensities = [];
+
+    // Add sun as first light
+    positions.push(...lightingConfig.sun.position);
+    colors.push(...lightingConfig.sun.color);
+    intensities.push(lightingConfig.sun.intensity);
+
+    // Add traffic lights
+    for (const light of trafficLights) {
+        // Position slightly above the traffic light
+        positions.push(light.position.x, light.position.y + 0.5, light.position.z);
+        // Color based on state: green or red
+        if (light.state) {
+            colors.push(0.0, 1.0, 0.0, 1.0); // Green
+        } else {
+            colors.push(1.0, 0.0, 0.0, 1.0); // Red
+        }
+        intensities.push(lightingConfig.trafficLightIntensity);
+    }
+
+    return {
+        count: 1 + trafficLights.length,
+        positions: positions,
+        colors: colors,
+        intensities: intensities
+    };
+}
 
 
 
@@ -118,15 +164,14 @@ async function setupObjects(scene, gl, programInfo) {
     const baseCube = new Object3D(-1);
     baseCube.prepareVAO(gl, programInfo);
 
-    // Cargar modelo del restaurante de sushi
-    console.log("🍣 Cargando restaurante de sushi...");
+    // Cargar materiales y modelo del restaurante de sushi
+    await loadMtlFile("../assets/models/sushi_restaurant.mtl");
     const sushiData = await loadObjModel("sushi_restaurant");
     let sushiModel = null;
-    
+
     if (sushiData) {
         sushiModel = new Object3D(-100);
         sushiModel.prepareVAO(gl, programInfo, sushiData);
-        console.log("✅ Restaurante de sushi listo");
     }
 
     // Add roads to the scene
@@ -141,13 +186,13 @@ async function setupObjects(scene, gl, programInfo) {
     // Add obstacles to the scene
     for (const agent of obstacles) {
     // Usar el modelo del restaurante SOLO en el primer obstáculo
-    if (agent.id === obstacles[1].id && sushiModel) {
+    if (agent.id === obstacles[0].id && sushiModel) {
       console.log("🏗️ Aplicando restaurante de sushi al obstáculo:", agent.id);
       agent.arrays = sushiModel.arrays;
       agent.bufferInfo = sushiModel.bufferInfo;
       agent.vao = sushiModel.vao;
-      agent.scale = { x: 0.01, y: 0.01, z: 0.01 }; // Escala pequeña - ajustar según sea necesario
-      agent.color = [0.9, 0.7, 0.5, 1.0]; // Color café/beige para el restaurante
+      agent.scale = { x: 0.01, y: 0.01, z: 0.01 };
+      agent.useVertexColor = true; // Usar colores del MTL
     } else {
       // El resto siguen siendo cubos
       agent.arrays = baseCube.arrays;
@@ -188,7 +233,7 @@ async function setupObjects(scene, gl, programInfo) {
 }
 
 // Draw an object with its corresponding transformations (Phong lighting)
-function drawObject(gl, programInfo, object, viewProjectionMatrix, fract) {
+function drawObject(gl, programInfo, object, viewProjectionMatrix, lights) {
     // Prepare the vector for translation and scale
     let v3_tra = object.posArray;
     let v3_sca = object.scaArray;
@@ -222,25 +267,31 @@ function drawObject(gl, programInfo, object, viewProjectionMatrix, fract) {
     const specularColor = object.specularColor || [1.0, 1.0, 1.0, 1.0];
     const shininess = object.shininess || 100;
 
-    // Phong lighting uniforms
+    // Phong lighting uniforms with multiple lights
     let objectUniforms = {
         // Matrices
         u_world: worldMatrix,
         u_worldInverseTransform: worldInverseTransform,
         u_worldViewProjection: worldViewProjection,
 
-        // Light properties (scene-level)
-        u_lightWorldPosition: lightingConfig.lightPosition,
+        // Camera position
         u_viewWorldPosition: scene.camera.posArray,
-        u_ambientLight: lightingConfig.ambientLight,
-        u_diffuseLight: lightingConfig.diffuseLight,
-        u_specularLight: lightingConfig.specularLight,
 
-        // Material properties (object-level)
+        // Ambient light
+        u_ambientLight: lightingConfig.ambientLight,
+
+        // Multiple lights
+        u_numLights: lights.count,
+        u_lightPositions: lights.positions,
+        u_lightColors: lights.colors,
+        u_lightIntensities: lights.intensities,
+
+        // Material properties
         u_ambientColor: ambientColor,
         u_diffuseColor: diffuseColor,
         u_specularColor: specularColor,
-        u_shininess: shininess
+        u_shininess: shininess,
+        u_useVertexColor: object.useVertexColor || false
     };
 
     twgl.setUniforms(programInfo, objectUniforms);
@@ -255,7 +306,6 @@ async function drawScene() {
     let now = Date.now();
     let deltaTime = now - then;
     elapsed += deltaTime;
-    let fract = Math.min(1.0, elapsed / duration);
     then = now;
 
     // Clear the canvas
@@ -269,10 +319,13 @@ async function drawScene() {
     scene.camera.checkKeys();
     const viewProjectionMatrix = setupViewProjection(gl);
 
+    // Build lights array (sun + traffic lights)
+    const lights = buildLightsArray();
+
     // Draw the objects with Phong lighting
     gl.useProgram(phongProgramInfo.program);
     for (let object of scene.objects) {
-        drawObject(gl, phongProgramInfo, object, viewProjectionMatrix, fract);
+        drawObject(gl, phongProgramInfo, object, viewProjectionMatrix, lights);
     }
 
     // Update the scene after the elapsed duration
