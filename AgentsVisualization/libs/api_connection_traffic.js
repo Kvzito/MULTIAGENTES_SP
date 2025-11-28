@@ -18,6 +18,7 @@ const trafficLights = [];
 const roads = [];
 const destinations = [];
 
+
 // Define the data object
 const initData = {
     NAgents: 5,  // Number of cars in the simulation
@@ -33,7 +34,7 @@ async function initTrafficModel() {
     try {
         let response = await fetch(agent_server_uri + "init", {
             method: 'POST',
-            headers: { 'Content-Type':'application/json' },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(initData)
         });
 
@@ -52,26 +53,26 @@ async function initTrafficModel() {
  */
 async function getCars() {
     try {
-        let response = await fetch(agent_server_uri + "getAgents");
+        let response = await fetch(agent_server_uri + "getCars");
 
         if (response.ok) {
             let result = await response.json();
 
-            if (cars.length == 0) {
-                for (const car of result.positions) {
+            for (const car of result.positions) {
+                const current_car = cars.find((object3d) => object3d.id == car.id);
+
+                if (current_car != undefined) {
+                    // Coche existente: guardar posición anterior para interpolación
+                    current_car.oldPosArray = current_car.posArray;
+                    current_car.position = { x: car.x, y: car.y, z: car.z };
+                    current_car.direction = car.direction;
+                } else {
+                    // Coche nuevo: agregar al array
                     const newCar = new Object3D(car.id, [car.x, car.y, car.z]);
                     newCar['oldPosArray'] = newCar.posArray;
-                    newCar.color = [1.0, 0.0, 0.0, 1.0]; // Red color for cars
+                    newCar['direction'] = car.direction;
+                    newCar.color = [1.0, 0.0, 0.0, 1.0];
                     cars.push(newCar);
-                }
-            } else {
-                for (const car of result.positions) {
-                    const current_car = cars.find((object3d) => object3d.id == car.id);
-
-                    if(current_car != undefined){
-                        current_car.oldPosArray = current_car.posArray;
-                        current_car.position = {x: car.x, y: car.y, z: car.z};
-                    }
                 }
             }
         }
@@ -124,7 +125,7 @@ async function getTrafficLights() {
                 for (const light of result.positions) {
                     const current_light = trafficLights.find((object3d) => object3d.id == light.id);
 
-                    if(current_light != undefined){
+                    if (current_light != undefined) {
                         current_light.state = light.state;
                         current_light.color = light.state ? [0.0, 1.0, 0.0, 1.0] : [1.0, 0.0, 0.0, 1.0];
                     }
@@ -199,17 +200,17 @@ async function update() {
     }
 }
 
-export { 
-    cars, 
-    obstacles, 
-    trafficLights, 
-    roads, 
-    destinations, 
-    initTrafficModel, 
-    update, 
-    getCars, 
-    getObstacles, 
-    getTrafficLights, 
-    getRoads, 
-    getDestinations 
+export {
+    cars,
+    obstacles,
+    trafficLights,
+    roads,
+    destinations,
+    initTrafficModel,
+    update,
+    getCars,
+    getObstacles,
+    getTrafficLights,
+    getRoads,
+    getDestinations
 };
