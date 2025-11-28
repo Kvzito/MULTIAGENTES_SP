@@ -38,37 +38,77 @@ def initModel():
 @cross_origin()
 def getAgents():
     global cityModel
-    
+
     if request.method == 'GET':
         try:
             # Get all Car agents
             agentCells = cityModel.grid.all_cells.select(
                 lambda cell: any(isinstance(obj, Car) for obj in cell.agents)
             ).cells
-            
+
             agents = [
                 (cell.coordinate, agent)
                 for cell in agentCells
                 for agent in cell.agents
                 if isinstance(agent, Car)
             ]
-            
+
             agentPositions = [
                 {"id": str(a.unique_id), "x": coordinate[0], "y": 1, "z": coordinate[1]}
                 for (coordinate, a) in agents
             ]
-            
+
             return jsonify({'positions': agentPositions})
         except Exception as e:
             print(e)
             return jsonify({"message": "Error with the agent positions"}), 500
 
 
+@app.route('/getCars', methods=['GET'])
+@cross_origin()
+def getCarsEndpoint():
+    global cityModel
+    if cityModel is None:
+        return jsonify({"message": "Model not initialized"}), 400
+
+    if request.method == 'GET':
+        try:
+            # Get all Car agents
+            carCells = cityModel.grid.all_cells.select(
+                lambda cell: any(isinstance(obj, Car) for obj in cell.agents)
+            ).cells
+
+            agents = [
+                (cell.coordinate, agent)
+                for cell in carCells
+                for agent in cell.agents
+                if isinstance(agent, Car)
+            ]
+
+            carPositions = [
+                {
+                    "id": str(a.unique_id),
+                    "x": coordinate[0],
+                    "y": 1,
+                    "z": coordinate[1],
+                    "direction": a.get_road_direction()
+                }
+                for (coordinate, a) in agents
+            ]
+
+            return jsonify({'positions': carPositions})
+        except Exception as e:
+            print(e)
+            return jsonify({"message": "Error with car positions"}), 500
+
+
 @app.route('/getObstacles', methods=['GET'])
 @cross_origin()
 def getObstacles():
     global cityModel
-    
+    if cityModel is None:
+        return jsonify({"message": "Model not initialized"}), 400
+
     if request.method == 'GET':
         try:
             # Get all Obstacle agents
@@ -83,10 +123,15 @@ def getObstacles():
                 if isinstance(agent, Obstacle)
             ]
             
-            obstaclePositions = [
-                {"id": str(a.unique_id), "x": coordinate[0], "y": 1, "z": coordinate[1]}
-                for (coordinate, a) in agents
-            ]
+            obstaclePositions = []
+            for (coordinate, a) in agents:
+                obstacle_data = {
+                    "id": str(a.unique_id), 
+                    "x": coordinate[0], 
+                    "y": 1, 
+                    "z": coordinate[1]
+                }
+                obstaclePositions.append(obstacle_data)
             
             return jsonify({'positions': obstaclePositions})
         except Exception as e:
@@ -98,7 +143,9 @@ def getObstacles():
 @cross_origin()
 def getTrafficLights():
     global cityModel
-    
+    if cityModel is None:
+        return jsonify({"message": "Model not initialized"}), 400
+
     if request.method == 'GET':
         try:
             # Get all Traffic_Light agents
@@ -134,7 +181,9 @@ def getTrafficLights():
 @cross_origin()
 def getRoads():
     global cityModel
-    
+    if cityModel is None:
+        return jsonify({"message": "Model not initialized"}), 400
+
     if request.method == 'GET':
         try:
             # Get all Road agents
@@ -170,7 +219,9 @@ def getRoads():
 @cross_origin()
 def getDestinations():
     global cityModel
-    
+    if cityModel is None:
+        return jsonify({"message": "Model not initialized"}), 400
+
     if request.method == 'GET':
         try:
             # Get all Destination agents
@@ -201,6 +252,8 @@ def getDestinations():
 def updateModel():
     global currentStep, cityModel
     if request.method == 'GET':
+        if cityModel is None:
+            return jsonify({"message": "Model not initialized. Call /init first."}), 400
         try:
             cityModel.step()
             currentStep += 1
