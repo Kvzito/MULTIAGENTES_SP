@@ -44,12 +44,14 @@ class Car(CellAgent):
 
     def calculate_route(self):
         """Calculate the route from current position to destination using BFS."""
-        # BFS to find path
-        queue = deque([(self.cell, [self.cell])])
+        # BFS to find path - now tracking direction to avoid opposite transitions
+        # Queue: (cell, path, last_valid_direction)
+        initial_direction = self.get_road_direction()
+        queue = deque([(self.cell, [self.cell], initial_direction)])
         visited = {self.cell}
 
         while queue:
-            current_cell, path = queue.popleft()
+            current_cell, path, path_direction = queue.popleft()
 
             # If we reached the destination, save the route
             if current_cell == self.destination:
@@ -63,27 +65,31 @@ class Car(CellAgent):
                     cell_direction = agent.direction
                     break
 
+            # Use the cell's direction if available, otherwise keep the path direction
+            # This is critical for traffic lights and destinations that don't have direction
+            effective_direction = cell_direction if cell_direction is not None else path_direction
+
             # If no road direction, this might be a traffic light or destination
             # Check adjacent cells to continue
             x, y = current_cell.coordinate
             width, height = self.model.grid.dimensions
 
-            # Define possible moves: can move forward or change lanes (perpendicular)
-            # but CANNOT move in opposite direction
-            if cell_direction == "Up":
+            # Define possible moves based on EFFECTIVE direction (maintains direction through semaphores)
+            # Can move forward or change lanes (perpendicular), but CANNOT move in opposite direction
+            if effective_direction == "Up":
                 # Can move Up (forward), Left or Right (lane change), NOT Down (opposite)
                 next_positions = [(x, y + 1), (x - 1, y), (x + 1, y)]
-            elif cell_direction == "Down":
+            elif effective_direction == "Down":
                 # Can move Down (forward), Left or Right (lane change), NOT Up (opposite)
                 next_positions = [(x, y - 1), (x - 1, y), (x + 1, y)]
-            elif cell_direction == "Right":
+            elif effective_direction == "Right":
                 # Can move Right (forward), Up or Down (lane change), NOT Left (opposite)
                 next_positions = [(x + 1, y), (x, y + 1), (x, y - 1)]
-            elif cell_direction == "Left":
+            elif effective_direction == "Left":
                 # Can move Left (forward), Up or Down (lane change), NOT Right (opposite)
                 next_positions = [(x - 1, y), (x, y + 1), (x, y - 1)]
             else:
-                # No direction, try all adjacent cells (for traffic lights, destinations)
+                # No direction available, try all adjacent cells (shouldn't happen often)
                 next_positions = [(x, y + 1), (x, y - 1), (x + 1, y), (x - 1, y)]
 
             # Explore next positions
@@ -105,10 +111,13 @@ class Car(CellAgent):
                                 next_cell_direction = agent.direction
                             break
 
-                    # Verify the next cell's direction is compatible (not opposite)
-                    if is_accessible and self.are_directions_compatible(cell_direction, next_cell_direction):
+                    # Verify the next cell's direction is compatible with EFFECTIVE direction (not opposite)
+                    # This ensures we don't go from Down to Up even through a semaphore
+                    if is_accessible and self.are_directions_compatible(effective_direction, next_cell_direction):
                         visited.add(next_cell)
-                        queue.append((next_cell, path + [next_cell]))
+                        # Pass the next cell's direction if it has one, otherwise keep effective direction
+                        next_path_direction = next_cell_direction if next_cell_direction is not None else effective_direction
+                        queue.append((next_cell, path + [next_cell], next_path_direction))
 
         # If no route found, route remains empty
         self.route = []
