@@ -26,6 +26,10 @@ def agent_portrayal(agent):
     if isinstance(agent, Obstacle):
         portrayal.color = "#555"
 
+    if isinstance(agent, Car):
+        portrayal.color = "blue"
+        portrayal.size = 15
+
     return portrayal
 
 
@@ -39,6 +43,14 @@ model_params = {
         "type": "InputText",
         "value": 42,
         "label": "Random Seed",
+    },
+    "spawn_interval": {
+        "type": "SliderInt",
+        "value": 10,
+        "label": "Intervalo de Spawn (steps)",
+        "min": 1,
+        "max": 50,
+        "step": 1,
     },
 }
 
