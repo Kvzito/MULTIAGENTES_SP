@@ -60,7 +60,7 @@ let then = 0;
 // Global models for dynamic objects
 let baseCubeModel = null;
 
-// Arrays de modelos para rotación
+// Arrays de modelos para rotacion
 let buildingModels = [];  // sushi_restaurant, SushiMini, WatchTower
 let carModels = [];       // JapanCar, CanaryCruiser
 
@@ -113,9 +113,6 @@ function buildLightsArray() {
 }
 
 
-
-
-// Main function is async to be able to make the requests
 async function main() {
     // Setup the canvas area
     const canvas = document.querySelector('canvas');
@@ -172,16 +169,18 @@ async function setupObjects(scene, gl, programInfo) {
     baseCubeModel.prepareVAO(gl, programInfo);
 
     // Cargar modelos de edificios
-    await loadMtlFile("../assets/models/sushi_restaurant.mtl");
-    const sushiRestData = await loadObjModel("sushi_restaurant");
-
-    await loadMtlFile("../assets/models/SushiMini.mtl");
-    const sushiMiniData = await loadObjModel("SushiMini");
-
     /*
-    await loadMtlFile("../assets/models/WatchTower.mtl");
-    const watchTowerData = await loadObjModel("WatchTower");
+    await loadMtlFile("../assets/models/PizzariaLEGO.mtl");
+    const pizzariaData = await loadObjModel("PizzariaLEGO");
     */
+    /*
+    await loadMtlFile("../assets/models/normalBuilding.mtl");
+    const normalBuildingData = await loadObjModel("normalBuilding");
+    */
+
+    // Cargar solo LegoBlenderType para edificios (55MB - más ligero)
+    await loadMtlFile("../assets/models/LegoBlenderType.mtl");
+    const legoBlenderData = await loadObjModel("LegoBlenderType");
 
     // Cargar modelos de coches
     await loadMtlFile("../assets/models/JapanCar.mtl");
@@ -190,32 +189,28 @@ async function setupObjects(scene, gl, programInfo) {
     await loadMtlFile("../assets/models/CanaryCruiser.mtl");
     const canaryData = await loadObjModel("CanaryCruiser");
 
-    // Crear modelos de edificios
-    if (sushiRestData) {
-        let model = new Object3D(-100);
-        model.prepareVAO(gl, programInfo, sushiRestData);
-        buildingModels.push({ model, scale: { x: 0.01, y: 0.01, z: 0.01 } });
-    }
-    if (sushiMiniData) {
+    // Crear modelo de edificio - solo uno, se usará en 3 obstáculos
+    if (legoBlenderData) {
         let model = new Object3D(-101);
-        model.prepareVAO(gl, programInfo, sushiMiniData);
+        model.prepareVAO(gl, programInfo, legoBlenderData);
         buildingModels.push({ model, scale: { x: 0.01, y: 0.01, z: 0.01 } });
     }
+
     
 
     // Crear modelos de coches
     if (japanCarData) {
-        let model = new Object3D(-103);
+        let model = new Object3D(-201);
         model.prepareVAO(gl, programInfo, japanCarData);
         carModels.push({
             model,
             scale: { x: 0.003, y: 0.005, z: 0.003 },
             rotationOffset: Math.PI / 2,
-            positionOffset: { x: 0, y: 0, z: 0.4 }  
+            positionOffset: { x: 0, y: 0, z: 0.4 }
         });
     }
     if (canaryData) {
-        let model = new Object3D(-104);
+        let model = new Object3D(-202);
         model.prepareVAO(gl, programInfo, canaryData);
         carModels.push({
             model,
@@ -234,18 +229,19 @@ async function setupObjects(scene, gl, programInfo) {
         scene.addObject(road);
     }
 
-    // Add obstacles to the scene (rotando entre modelos de edificios)
+    // Add obstacles to the scene - solo 3 usan LegoBlenderType, el resto cubos
     for (let i = 0; i < obstacles.length; i++) {
         const agent = obstacles[i];
-        if (buildingModels.length > 0) {
-            // Asignar modelo de edificio basado en el índice
-            const buildingData = buildingModels[i % buildingModels.length];
+        if (i < 3 && buildingModels.length > 0) {
+            // Solo los primeros 3 obstáculos usan el modelo 3D
+            const buildingData = buildingModels[0];
             agent.arrays = buildingData.model.arrays;
             agent.bufferInfo = buildingData.model.bufferInfo;
             agent.vao = buildingData.model.vao;
             agent.scale = buildingData.scale;
             agent.useVertexColor = true;
         } else {
+            // El resto usa cubos básicos
             agent.arrays = baseCubeModel.arrays;
             agent.bufferInfo = baseCubeModel.bufferInfo;
             agent.vao = baseCubeModel.vao;
