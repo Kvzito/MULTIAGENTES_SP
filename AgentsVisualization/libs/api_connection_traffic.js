@@ -25,7 +25,7 @@ const initData = {
 };
 
 
-/* FUNCTIONS FOR THE INTERACTION WITH THE TRAFFIC MODEL SERVER */
+
 
 /**
  * Initializes the traffic model by sending a POST request to the server.
@@ -58,19 +58,34 @@ async function getCars() {
         if (response.ok) {
             let result = await response.json();
 
+            // Obtener IDs de coches actuales del servidor
+            const serverCarIds = new Set(result.positions.map(car => car.id));
+
+            // Eliminar coches que ya no estan en el servidor
+            for (let i = cars.length - 1; i >= 0; i--) {
+                if (!serverCarIds.has(cars[i].id)) {
+                    console.log(`Car ${cars[i].id} reached destination - removing from array`);
+                    cars.splice(i, 1);
+                }
+            }
+
             for (const car of result.positions) {
                 const current_car = cars.find((object3d) => object3d.id == car.id);
 
                 if (current_car != undefined) {
-                    // Coche existente: guardar posición anterior para interpolación
+                    // Triple buffering: old <- current, current <- new, future from server
                     current_car.oldPosArray = current_car.posArray;
                     current_car.position = { x: car.x, y: car.y, z: car.z };
                     current_car.direction = car.direction;
+                    // Store future position for smoother interpolation
+                    current_car.futurePos = { x: car.futureX, y: car.y, z: car.futureZ };
                 } else {
                     // Coche nuevo: agregar al array
                     const newCar = new Object3D(car.id, [car.x, car.y, car.z]);
                     newCar['oldPosArray'] = newCar.posArray;
                     newCar['direction'] = car.direction;
+                    // Initialize future position same as current
+                    newCar['futurePos'] = { x: car.futureX, y: car.y, z: car.futureZ };
                     newCar.color = [1.0, 0.0, 0.0, 1.0];
                     cars.push(newCar);
                 }

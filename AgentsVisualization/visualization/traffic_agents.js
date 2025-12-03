@@ -1,6 +1,6 @@
 /*
- * 3D scene for Traffic Model visualization
- * Based on the city traffic simulation
+ * Escena 3D para visualizar el modelo de trafico
+ * Simulacion de ciudad con carros, semaforos, edificios y destinos
  */
 
 'use strict';
@@ -11,361 +11,619 @@ import { M4 } from '../libs/3d-lib';
 import { Scene3D } from '../libs/scene3d';
 import { Object3D } from '../libs/object3d';
 import { Camera3D } from '../libs/camera3d';
-import { loadMtl } from '../libs/obj_loader';
+import { preloadModel } from '../libs/obj_loader.js';
 
-// Functions and arrays for the communication with the API
+// Comunicacion con la API del servidor
 import {
     cars, obstacles, trafficLights, roads, destinations,
     initTrafficModel, update, getCars, getObstacles,
     getTrafficLights, getRoads, getDestinations
 } from '../libs/api_connection_traffic.js';
 
-// Define the shader code, using GLSL 3.00 - Phong Lighting
+// Shaders para iluminacion Phong
 import vsGLSL from '../assets/shaders/vs_phong.glsl?raw';
 import fsGLSL from '../assets/shaders/fs_phong.glsl?raw';
 
-async function loadObjModel(modelName) {
-    const response = await fetch(`../assets/models/${modelName}.obj`);
-    if (!response.ok) {
-        console.error(` Error al cargar ${modelName}.obj`);
-        return null;
-    }
-    const objText = await response.text();
-    console.log(` Modelo cargado: ${modelName}.obj`);
-    return objText;
-}
+// Rutas y nombres de los modelos 3D
+const MODELS_PATH = '../3d-modelos-obj/';
+const BUILDING_MODELS = ['Building1', 'PuestoJochos'];
+const CAR_MODELS = ['redCarBlendobj', 'ClassicCarBlend'];
+const TRAFFIC_LIGHT_MODEL = 'Semaforo';
+const DESTINATION_MODEL = 'EstacionamientoObjetivo';
+const TREE_MODEL = 'ArbolBlend';
 
-async function loadMtlFile(mtlPath) {
-    const response = await fetch(mtlPath);
-    if (!response.ok) {
-        console.error(` Error al cargar MTL: ${mtlPath}`);
-        return null;
-    }
-    const mtlText = await response.text();
-    loadMtl(mtlText);
-    console.log(` Materiales cargados: ${mtlPath}`);
-    return true;
-}
+// Cache de modelos precargados
+let carModels = [];
+let buildingModels = [];
+let trafficLightModel = null;
+let destinationModel = null;
+let treeModel = null;
 
+// Esferitas que indican el color del semaforo (verde/rojo)
+const trafficLightSpheres = new Map();
+
+// Rotaciones segun la direccion del carro
+const DIRECTION_ROTATIONS = {
+    'Up': Math.PI,
+    'Down': 0,
+    'Left': Math.PI / 2,
+    'Right': -Math.PI / 2
+};
+
+// Escala global, si quieres hacer todo mas grande solo sube este numero
+const GLOBAL_SCALE = 1.5;
+
+// Offsets para que los carros no se vean enterrados en el piso
+const CAR_Y_OFFSET = 0.30;
+const CAR_Z_OFFSET = -0.15;
 
 const scene = new Scene3D();
 
-// Global variables
+// Variables globales
 let phongProgramInfo = undefined;
 let gl = undefined;
-const duration = 1000; // ms
+const duration = 800; // milisegundos entre cada actualizacion
 let elapsed = 0;
 let then = 0;
 
-// Global models for dynamic objects
-let baseCubeModel = null;
-
-// Arrays de modelos para rotación
-let buildingModels = [];  // sushi_restaurant, SushiMini, WatchTower
-let carModels = [];       // JapanCar, CanaryCruiser
-
-// Lighting configuration
+// Configuracion de luces, ambiente tipo atardecer
 const lightingConfig = {
-    // Ambient light (always present)
-    ambientLight: [0.2, 0.2, 0.2, 1.0],
+    ambientLight: [0.4, 0.4, 0.4, 1.0],
 
-    // Sun light configuration
-    sun: {
-        position: [15, 30, 15],
-        color: [1.0, 1.0, 0.9, 1.0],
-        intensity: 1.1
-    },
-
-    // Traffic light intensity (subtle glow)
-    trafficLightIntensity: 0.05
+    lights: [
+        // Sol principal, bajo y anaranjado
+        { position: [-20, 8, 30], color: [0.5, 0.5, 0.5, 1.0], intensity: 1.2 },
+        // Reflejo calido del otro lado
+        { position: [40, 5, -10], color: [1.0, 0.35, 0.15, 1.0], intensity: 0.6 },
+        // Luz suave del cielo desde arriba
+        { position: [12, 40, 12], color: [0.4, 0.3, 0.5, 1.0], intensity: 0.3 },
+        // Rebote del suelo
+        { position: [12, -5, 12], color: [0.8, 0.4, 0.2, 1.0], intensity: 0.2 }
+    ]
 };
 
-// Build array of all lights (sun + traffic lights)
-function buildLightsArray() {
-    const positions = [];
-    const colors = [];
-    const intensities = [];
 
-    // Add sun as first light
-    positions.push(...lightingConfig.sun.position);
-    colors.push(...lightingConfig.sun.color);
-    intensities.push(lightingConfig.sun.intensity);
+// Precarga todos los modelos 3D antes de empezar
+async function preloadAllModels(gl, programInfo) {
 
-    // Add traffic lights
-    for (const light of trafficLights) {
-        // Position slightly above the traffic light
-        positions.push(light.position.x, light.position.y + 0.5, light.position.z);
-        // Color based on state: green or red
-        if (light.state) {
-            colors.push(0.0, 1.0, 0.0, 1.0); // Green
-        } else {
-            colors.push(1.0, 0.0, 0.0, 1.0); // Red
+    for (const carName of CAR_MODELS) {
+        const model = await preloadModel(gl, programInfo, MODELS_PATH, carName, 1.5);
+        if (model) {
+            carModels.push({ name: carName, ...model });
         }
-        intensities.push(lightingConfig.trafficLightIntensity);
     }
 
-    return {
-        count: 1 + trafficLights.length,
-        positions: positions,
-        colors: colors,
-        intensities: intensities
-    };
+    trafficLightModel = await preloadModel(gl, programInfo, MODELS_PATH, TRAFFIC_LIGHT_MODEL, 1.0);
+    destinationModel = await preloadModel(gl, programInfo, MODELS_PATH, DESTINATION_MODEL, 1.0);
+    treeModel = await preloadModel(gl, programInfo, MODELS_PATH, TREE_MODEL, 1.0);
+
+    for (const buildingName of BUILDING_MODELS) {
+        const model = await preloadModel(gl, programInfo, MODELS_PATH, buildingName, 1.0);
+        if (model) {
+            buildingModels.push({ name: buildingName, ...model });
+        }
+    }
 }
 
-
-
-
-// Main function is async to be able to make the requests
+// Funcion principal, es async porque hace peticiones al servidor
 async function main() {
-    // Setup the canvas area
     const canvas = document.querySelector('canvas');
     gl = canvas.getContext('webgl2');
     twgl.resizeCanvasToDisplaySize(gl.canvas);
     gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
 
-    // Prepare the program with the shaders (Phong lighting)
     phongProgramInfo = twgl.createProgramInfo(gl, [vsGLSL, fsGLSL]);
 
-    // Initialize the traffic model
+    // Hay que precargar los modelos antes de iniciar la escena
+    await preloadAllModels(gl, phongProgramInfo);
+
     await initTrafficModel();
 
-    // Get all the different elements from the city
+    // Traer todos los elementos de la ciudad desde el servidor
     await getCars();
     await getObstacles();
-
-
-
     await getTrafficLights();
     await getRoads();
     await getDestinations();
 
-    // Initialize the scene
     setupScene();
-
-    // Position the objects in the scene
     setupObjects(scene, gl, phongProgramInfo);
-
-    // Prepare the user interface
     setupUI();
-
-    // First call to the drawing loop
     drawScene();
 }
 
 
 function setupScene() {
+    // Valores encontrados a prueba y error para que se vea bien la ciudad
     let camera = new Camera3D(0,
-        30,             // Distance to target
+        30,             // Distancia al objetivo
         4,              // Azimut
-        0.6,            // Elevation
-        [10, 0, 10],    // Target position (center of the city)
+        0.6,            // Elevacion
+        [12, 0, 12],    // Centro de la ciudad
         [0, 0, 0]);
-    // These values are empirical.
     camera.panOffset = [0, 8, 0];
     scene.setCamera(camera);
     scene.camera.setupControls();
 }
 
 async function setupObjects(scene, gl, programInfo) {
-    // Create VAOs for the different shapes
-    baseCubeModel = new Object3D(-1);
-    baseCubeModel.prepareVAO(gl, programInfo);
+    // Cubo base que se reutiliza para calles, pasto, etc
+    const baseCube = new Object3D(-1);
+    baseCube.prepareVAO(gl, programInfo);
 
-    // Cargar modelos de edificios
-    await loadMtlFile("../assets/models/sushi_restaurant.mtl");
-    const sushiRestData = await loadObjModel("sushi_restaurant");
-
-    await loadMtlFile("../assets/models/SushiMini.mtl");
-    const sushiMiniData = await loadObjModel("SushiMini");
-
-    /*
-    await loadMtlFile("../assets/models/WatchTower.mtl");
-    const watchTowerData = await loadObjModel("WatchTower");
-    */
-
-    // Cargar modelos de coches
-    await loadMtlFile("../assets/models/JapanCar.mtl");
-    const japanCarData = await loadObjModel("JapanCar");
-
-    await loadMtlFile("../assets/models/CanaryCruiser.mtl");
-    const canaryData = await loadObjModel("CanaryCruiser");
-
-    // Crear modelos de edificios
-    if (sushiRestData) {
-        let model = new Object3D(-100);
-        model.prepareVAO(gl, programInfo, sushiRestData);
-        buildingModels.push({ model, scale: { x: 0.01, y: 0.01, z: 0.01 } });
-    }
-    if (sushiMiniData) {
-        let model = new Object3D(-101);
-        model.prepareVAO(gl, programInfo, sushiMiniData);
-        buildingModels.push({ model, scale: { x: 0.01, y: 0.01, z: 0.01 } });
-    }
-    
-
-    // Crear modelos de coches
-    if (japanCarData) {
-        let model = new Object3D(-103);
-        model.prepareVAO(gl, programInfo, japanCarData);
-        carModels.push({
-            model,
-            scale: { x: 0.003, y: 0.005, z: 0.003 },
-            rotationOffset: Math.PI / 2,
-            positionOffset: { x: 0, y: 0, z: 0.4 }  
-        });
-    }
-    if (canaryData) {
-        let model = new Object3D(-104);
-        model.prepareVAO(gl, programInfo, canaryData);
-        carModels.push({
-            model,
-            scale: { x: 0.003, y: 0.005, z: 0.003 },
-            rotationOffset: 0,
-            positionOffset: { x: 0, y: 0, z: 0 }
-        });
-    }
-
-    // Add roads to the scene
+    // Agregar calles
     for (const road of roads) {
-        road.arrays = baseCubeModel.arrays;
-        road.bufferInfo = baseCubeModel.bufferInfo;
-        road.vao = baseCubeModel.vao;
-        road.scale = { x: 0.5, y: 0.1, z: 0.5 };
+        road.arrays = baseCube.arrays;
+        road.bufferInfo = baseCube.bufferInfo;
+        road.vao = baseCube.vao;
+        road.scale = { x: 0.5 * GLOBAL_SCALE, y: 0.1 * GLOBAL_SCALE, z: 0.5 * GLOBAL_SCALE };
+        road.color = [0.25, 0.25, 0.27, 1.0];
+        road.diffuseColor = [0.2, 0.2, 0.22, 1.0];
+        road.specularColor = [0.05, 0.05, 0.05, 1.0];
+        road.shininess = 4;
+        road.useVertexColor = false;
         scene.addObject(road);
     }
 
-    // Add obstacles to the scene (rotando entre modelos de edificios)
-    for (let i = 0; i < obstacles.length; i++) {
-        const agent = obstacles[i];
-        if (buildingModels.length > 0) {
-            // Asignar modelo de edificio basado en el índice
-            const buildingData = buildingModels[i % buildingModels.length];
-            agent.arrays = buildingData.model.arrays;
-            agent.bufferInfo = buildingData.model.bufferInfo;
-            agent.vao = buildingData.model.vao;
-            agent.scale = buildingData.scale;
-            agent.useVertexColor = true;
-        } else {
-            agent.arrays = baseCubeModel.arrays;
-            agent.bufferInfo = baseCubeModel.bufferInfo;
-            agent.vao = baseCubeModel.vao;
-            agent.scale = { x: 0.5, y: 0.5, z: 0.5 };
-            agent.color = [0.7, 0.7, 0.7, 1.0];
-        }
-        scene.addObject(agent);
-    }
-
-    // Add traffic lights to the scene
-    for (const light of trafficLights) {
-        light.arrays = baseCubeModel.arrays;
-        light.bufferInfo = baseCubeModel.bufferInfo;
-        light.vao = baseCubeModel.vao;
-        light.scale = { x: 0.5, y: 0.5, z: 0.5 };
-        scene.addObject(light);
-    }
-
-    // Add destinations to the scene
+    // Guardamos posiciones de destinos para no poner edificios encima
+    const destinationPositions = new Set();
     for (const dest of destinations) {
-        dest.arrays = baseCubeModel.arrays;
-        dest.bufferInfo = baseCubeModel.bufferInfo;
-        dest.vao = baseCubeModel.vao;
-        dest.scale = { x: 0.5, y: 0.3, z: 0.5 };
+        destinationPositions.add(`${Math.round(dest.position.x)},${Math.round(dest.position.z)}`);
+    }
+
+    // Agrupar obstaculos contiguos en areas (para saber donde poner edificios)
+    const obstacleGroups = groupContiguousObstacles(obstacles);
+
+    let buildingIndex = 0;
+    let puestoJochosCount = 0;
+    const MAX_PUESTO_JOCHOS = 3;
+
+    for (const group of obstacleGroups) {
+        const minX = Math.min(...group.map(o => o.position.x));
+        const maxX = Math.max(...group.map(o => o.position.x));
+        const minZ = Math.min(...group.map(o => o.position.z));
+        const maxZ = Math.max(...group.map(o => o.position.z));
+
+        // Si hay un destino cerca, no ponemos edificio ahi
+        const hasAdjacentDestination = group.some(obs => {
+            const x = Math.round(obs.position.x);
+            const z = Math.round(obs.position.z);
+            return destinationPositions.has(`${x},${z}`) ||
+                   destinationPositions.has(`${x+1},${z}`) ||
+                   destinationPositions.has(`${x-1},${z}`) ||
+                   destinationPositions.has(`${x},${z+1}`) ||
+                   destinationPositions.has(`${x},${z-1}`);
+        });
+
+        // Poner pasto en cada posicion del grupo
+        let treeIndex = 0;
+        for (const obs of group) {
+            const grassTile = new Object3D(
+                `grass_${obs.id}`,
+                [obs.position.x, obs.position.y, obs.position.z],
+                [0, 0, 0],
+                [1, 1, 1]
+            );
+            grassTile.arrays = baseCube.arrays;
+            grassTile.bufferInfo = baseCube.bufferInfo;
+            grassTile.vao = baseCube.vao;
+            grassTile.scale = { x: 0.5 * GLOBAL_SCALE, y: 0.15 * GLOBAL_SCALE, z: 0.5 * GLOBAL_SCALE };
+            grassTile.color = [0.22, 0.45, 0.22, 1.0];
+            grassTile.diffuseColor = [0.2, 0.4, 0.2, 1.0];
+            grassTile.specularColor = [0.02, 0.02, 0.02, 1.0];
+            grassTile.shininess = 2;
+            grassTile.useVertexColor = false;
+            scene.addObject(grassTile);
+
+            // Arboles al azar, como 20% de probabilidad
+            if (treeModel && Math.random() < 0.2) {
+                const tree = new Object3D(
+                    `tree_${obs.id}_${treeIndex++}`,
+                    [0, 0, 0],
+                    [0, 0, 0],
+                    [1, 1, 1]
+                );
+                tree.arrays = treeModel.arrays;
+                tree.bufferInfo = treeModel.bufferInfo;
+                tree.vao = treeModel.vao;
+                tree.position = { x: obs.position.x, y: obs.position.y + 0.2, z: obs.position.z };
+                tree.scale = { x: 0.003 * GLOBAL_SCALE, y: 0.003 * GLOBAL_SCALE, z: 0.003 * GLOBAL_SCALE };
+                tree.rotRad = { x: 0, y: Math.random() * Math.PI * 2, z: 0 };
+                scene.addObject(tree);
+            }
+        }
+
+        if (hasAdjacentDestination) continue;
+        if (buildingModels.length === 0) continue;
+
+        // Checar si es un area chica (fila) o grande (bloque)
+        const width = maxX - minX + 1;
+        const height = maxZ - minZ + 1;
+        const isSmallArea = group.length <= 3 || width === 1 || height === 1;
+
+        // Areas chicas solo ponen PuestoJochos si no hemos llegado al limite
+        if (isSmallArea) {
+            if (puestoJochosCount >= MAX_PUESTO_JOCHOS) {
+                continue;
+            }
+            const puestoModel = buildingModels.find(b => b.name === 'PuestoJochos');
+            if (!puestoModel) continue;
+
+            puestoJochosCount++;
+
+            const randomObs = group[Math.floor(Math.random() * group.length)];
+            const baseY = randomObs.position.y;
+
+            const buildingObj = new Object3D(
+                `building_${++buildingIndex}`,
+                [0, 0, 0],
+                [0, 0, 0],
+                [1, 1, 1]
+            );
+
+            buildingObj.arrays = puestoModel.arrays;
+            buildingObj.bufferInfo = puestoModel.bufferInfo;
+            buildingObj.vao = puestoModel.vao;
+            buildingObj.position = { x: randomObs.position.x, y: baseY + 0.15, z: randomObs.position.z };
+            buildingObj.scale = { x: 0.003 * GLOBAL_SCALE, y: 0.003 * GLOBAL_SCALE, z: 0.003 * GLOBAL_SCALE };
+            buildingObj.rotRad = { x: 0, y: Math.floor(Math.random() * 4) * (Math.PI / 2), z: 0 };
+            buildingObj.color = [0.8, 0.8, 0.8, 1.0];
+
+            scene.addObject(buildingObj);
+        } else {
+            // Areas grandes usan Building1
+            const building1Model = buildingModels.find(b => b.name === 'Building1');
+            if (!building1Model) continue;
+
+            const randomObs = group[Math.floor(Math.random() * group.length)];
+            const baseY = randomObs.position.y;
+
+            const buildingObj = new Object3D(
+                `building_${++buildingIndex}`,
+                [0, 0, 0],
+                [0, 0, 0],
+                [1, 1, 1]
+            );
+
+            buildingObj.arrays = building1Model.arrays;
+            buildingObj.bufferInfo = building1Model.bufferInfo;
+            buildingObj.vao = building1Model.vao;
+            buildingObj.position = { x: randomObs.position.x, y: baseY, z: randomObs.position.z };
+            buildingObj.scale = { x: 0.003 * GLOBAL_SCALE, y: 0.003 * GLOBAL_SCALE, z: 0.003 * GLOBAL_SCALE };
+            buildingObj.rotRad = { x: 0, y: Math.floor(Math.random() * 4) * (Math.PI / 2), z: 0 };
+            buildingObj.color = [0.8, 0.8, 0.8, 1.0];
+
+            scene.addObject(buildingObj);
+        }
+    }
+
+    // Semaforos, con calle abajo
+    for (const light of trafficLights) {
+        const roadUnderLight = new Object3D(
+            `road_light_${light.id}`,
+            [light.position.x, light.position.y, light.position.z]
+        );
+        roadUnderLight.arrays = baseCube.arrays;
+        roadUnderLight.bufferInfo = baseCube.bufferInfo;
+        roadUnderLight.vao = baseCube.vao;
+        roadUnderLight.scale = { x: 0.5 * GLOBAL_SCALE, y: 0.1 * GLOBAL_SCALE, z: 0.5 * GLOBAL_SCALE };
+        roadUnderLight.color = [0.4, 0.4, 0.4, 1.0];
+        roadUnderLight.useVertexColor = false;
+        scene.addObject(roadUnderLight);
+
+        if (trafficLightModel) {
+            light.arrays = trafficLightModel.arrays;
+            light.bufferInfo = trafficLightModel.bufferInfo;
+            light.vao = trafficLightModel.vao;
+            light.scale = { x: 0.005 * GLOBAL_SCALE, y: 0.005 * GLOBAL_SCALE, z: 0.005 * GLOBAL_SCALE };
+            light.position.y = 2.5;
+        } else {
+            light.arrays = baseCube.arrays;
+            light.bufferInfo = baseCube.bufferInfo;
+            light.vao = baseCube.vao;
+            light.scale = { x: 0.3 * GLOBAL_SCALE, y: 0.6 * GLOBAL_SCALE, z: 0.3 * GLOBAL_SCALE };
+        }
+        scene.addObject(light);
+
+        // Esferita que brilla verde o rojo segun el estado del semaforo
+        const lightSphere = new Object3D(
+            `light_sphere_${light.id}`,
+            [light.position.x, light.position.y + 0.8, light.position.z],
+            [0, 0, 0],
+            [1, 1, 1]
+        );
+        lightSphere.arrays = baseCube.arrays;
+        lightSphere.bufferInfo = baseCube.bufferInfo;
+        lightSphere.vao = baseCube.vao;
+        lightSphere.scale = { x: 0.18 * GLOBAL_SCALE, y: 0.18 * GLOBAL_SCALE, z: 0.18 * GLOBAL_SCALE };
+        lightSphere.color = light.state ? [0.2, 1.0, 0.2, 1.0] : [1.0, 0.2, 0.1, 1.0];
+        lightSphere.diffuseColor = light.state ? [0.3, 1.2, 0.3, 1.0] : [1.2, 0.3, 0.15, 1.0];
+        lightSphere.specularColor = [1.0, 1.0, 1.0, 1.0];
+        lightSphere.shininess = 64;
+        lightSphere.ambientColor = light.state ? [0.1, 0.5, 0.1, 1.0] : [0.5, 0.1, 0.05, 1.0];
+        lightSphere.useVertexColor = false;
+        scene.addObject(lightSphere);
+
+        trafficLightSpheres.set(light.id, lightSphere);
+    }
+
+    // Destinos (estacionamientos donde llegan los carros)
+    const DEST_Y_OFFSET = 0.3;
+    for (const dest of destinations) {
+        if (destinationModel) {
+            dest.arrays = destinationModel.arrays;
+            dest.bufferInfo = destinationModel.bufferInfo;
+            dest.vao = destinationModel.vao;
+            dest.scale = { x: 0.002 * GLOBAL_SCALE, y: 0.002 * GLOBAL_SCALE, z: 0.002 * GLOBAL_SCALE };
+
+            const originalX = dest.position.x;
+            const originalZ = dest.position.z;
+            dest.position.y += DEST_Y_OFFSET;
+
+            // Buscar la calle mas cercana para orientar el destino hacia ella
+            let rotation = 0;
+            let minDist = Infinity;
+            let closestRoad = null;
+
+            for (const road of roads) {
+                const dx = road.position.x - originalX;
+                const dz = road.position.z - originalZ;
+                const dist = Math.abs(dx) + Math.abs(dz);
+
+                if (dist < 1.5 && dist < minDist) {
+                    minDist = dist;
+                    closestRoad = { dx, dz };
+                }
+            }
+
+            if (closestRoad) {
+                const { dx, dz } = closestRoad;
+                if (Math.abs(dx) > Math.abs(dz)) {
+                    rotation = dx > 0 ? -Math.PI / 2 : Math.PI / 2;
+                } else {
+                    rotation = dz > 0 ? Math.PI : 0;
+                }
+            }
+
+            dest.rotRad = { x: 0, y: rotation, z: 0 };
+        } else {
+            dest.arrays = baseCube.arrays;
+            dest.bufferInfo = baseCube.bufferInfo;
+            dest.vao = baseCube.vao;
+            dest.scale = { x: 0.5 * GLOBAL_SCALE, y: 0.3 * GLOBAL_SCALE, z: 0.5 * GLOBAL_SCALE };
+        }
         scene.addObject(dest);
     }
-}
 
-// Contador para rotar modelos de coches
-let carModelIndex = 0;
-
-// Configura un coche con el modelo correcto
-function setupCar(car) {
-    if (!car.vao) {
+    // Carros, se les asigna un modelo al azar
+    for (const car of cars) {
         if (carModels.length > 0) {
-            // Asignar modelo de coche rotando entre los disponibles
-            const carData = carModels[carModelIndex % carModels.length];
-            car.arrays = carData.model.arrays;
-            car.bufferInfo = carData.model.bufferInfo;
-            car.vao = carData.model.vao;
-            car.scale = carData.scale;
-            car.rotationOffset = carData.rotationOffset || 0;
-            car.positionOffset = carData.positionOffset || { x: 0, y: 0, z: 0 };
-            car.useVertexColor = true;
-            carModelIndex++;
+            const randomCarModel = carModels[Math.floor(Math.random() * carModels.length)];
+            car.arrays = randomCarModel.arrays;
+            car.bufferInfo = randomCarModel.bufferInfo;
+            car.vao = randomCarModel.vao;
+            car.scale = { x: 0.002 * GLOBAL_SCALE, y: 0.002 * GLOBAL_SCALE, z: 0.0015 * GLOBAL_SCALE };
+            car.renderPos = {
+                x: car.position.x,
+                y: car.position.y + CAR_Y_OFFSET,
+                z: car.position.z + CAR_Z_OFFSET
+            };
+            car.currentRotY = 0;
+            car.targetRotY = 0;
+            updateCarRotation(car);
         } else {
-            car.arrays = baseCubeModel.arrays;
-            car.bufferInfo = baseCubeModel.bufferInfo;
-            car.vao = baseCubeModel.vao;
-            car.scale = { x: 0.4, y: 0.4, z: 0.4 };
-            car.color = [1.0, 0.0, 0.0, 1.0];
+            car.arrays = baseCube.arrays;
+            car.bufferInfo = baseCube.bufferInfo;
+            car.vao = baseCube.vao;
+            car.scale = { x: 0.4 * GLOBAL_SCALE, y: 0.4 * GLOBAL_SCALE, z: 0.4 * GLOBAL_SCALE };
         }
         scene.addObject(car);
     }
 }
 
+// Agrupa obstaculos contiguos usando flood-fill 
+function groupContiguousObstacles(obstacles) {
+    const groups = [];
+    const visited = new Set();
 
-function setCarRotation(car) {
-    const offset = car.rotationOffset || 0;
-    switch (car.direction) {
-        case "Up":
-            car.rotRad = { x: 0, y: 0 + offset, z: 0 };
-            break;
-        case "Down":
-            car.rotRad = { x: 0, y: Math.PI + offset, z: 0 };
-            break;
-        case "Right":
-            car.rotRad = { x: 0, y: -Math.PI / 2 + offset, z: 0 };
-            break;
-        case "Left":
-            car.rotRad = { x: 0, y: Math.PI / 2 + offset, z: 0 };
-            break;
-        default:
-            car.rotRad = { x: 0, y: 0 + offset, z: 0 };
+    const posMap = new Map();
+    for (const obs of obstacles) {
+        const key = `${Math.round(obs.position.x)},${Math.round(obs.position.z)}`;
+        posMap.set(key, obs);
+    }
+
+    // Vecinos en 4 direcciones
+    function getNeighbors(obs) {
+        const x = Math.round(obs.position.x);
+        const z = Math.round(obs.position.z);
+        const neighbors = [];
+        const directions = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+        for (const [dx, dz] of directions) {
+            const key = `${x + dx},${z + dz}`;
+            if (posMap.has(key) && !visited.has(key)) {
+                neighbors.push(posMap.get(key));
+            }
+        }
+        return neighbors;
+    }
+
+    for (const obs of obstacles) {
+        const key = `${Math.round(obs.position.x)},${Math.round(obs.position.z)}`;
+        if (visited.has(key)) continue;
+
+        const group = [];
+        const stack = [obs];
+
+        while (stack.length > 0) {
+            const current = stack.pop();
+            const currentKey = `${Math.round(current.position.x)},${Math.round(current.position.z)}`;
+
+            if (visited.has(currentKey)) continue;
+            visited.add(currentKey);
+            group.push(current);
+
+            const neighbors = getNeighbors(current);
+            stack.push(...neighbors);
+        }
+
+        if (group.length > 0) {
+            groups.push(group);
+        }
+    }
+
+    return groups;
+}
+
+// Interpolacion lineal basica
+function lerp(start, end, t) {
+    return start + (end - start) * t;
+}
+
+// Interpolacion de angulos que maneja el wraparound de 360 grados
+function lerpAngle(start, end, t) {
+    let diff = end - start;
+    while (diff > Math.PI) diff -= 2 * Math.PI;
+    while (diff < -Math.PI) diff += 2 * Math.PI;
+    return start + diff * t;
+}
+
+// Ease-in-out para que el movimiento se vea mas natural
+function smoothstep(t) {
+    return t * t * (3 - 2 * t);
+}
+
+// Interpolacion Hermite, hace curvas suaves usando velocidades
+// FUNCION : hermiteInterp(p0, p1, v0, v1, t)
+// p0: posicion inicial
+// p1: posicion final
+// v0: velocidad inicial
+// v1: velocidad final
+// t: parametro de interpolacion [0, 1]
+// RETORNA: valor interpolado
+function hermiteInterp(p0, p1, v0, v1, t) {
+    const t2 = t * t;
+    const t3 = t2 * t;
+
+    const h00 = 2*t3 - 3*t2 + 1;
+    const h10 = t3 - 2*t2 + t;
+    const h01 = -2*t3 + 3*t2;
+    const h11 = t3 - t2;
+
+    return h00 * p0 + h10 * v0 + h01 * p1 + h11 * v1;
+}
+
+function updateCarRotation(car) {
+    if (car.direction && DIRECTION_ROTATIONS.hasOwnProperty(car.direction)) {
+        car.targetRotY = DIRECTION_ROTATIONS[car.direction];
     }
 }
 
-/**
- * Linear interpolation between two values
- */
-function lerp(a, b, t) {
-    return a + (b - a) * t;
-}
+// Actualiza carros: quita los que llegaron a su destino, agrega los nuevos
+function updateCars() {
+    const currentCarIds = new Set(cars.map(c => c.id));
 
+    // Quitar de la escena los carros que ya no estan en la API
+    const carVAOs = new Set(carModels.map(m => m.vao));
+    const carsInScene = scene.objects.filter(obj =>
+        obj.id && carVAOs.has(obj.vao)
+    );
 
-function getInterpolatedPosition(object, fract) {
-    if (object.oldPosArray) {
-        return [
-            lerp(object.oldPosArray[0], object.posArray[0], fract),
-            lerp(object.oldPosArray[1], object.posArray[1], fract),
-            lerp(object.oldPosArray[2], object.posArray[2], fract)
-        ];
-    }
-    return object.posArray;
-}
-
-
-function drawObject(gl, programInfo, object, viewProjectionMatrix, lights, fract) {
-    
-    let v3_tra = object.oldPosArray ? getInterpolatedPosition(object, fract) : object.posArray;
-
-    
-    if (object.positionOffset) {
-        v3_tra = [
-            v3_tra[0] + object.positionOffset.x,
-            v3_tra[1] + object.positionOffset.y,
-            v3_tra[2] + object.positionOffset.z
-        ];
+    for (const carInScene of carsInScene) {
+        if (!currentCarIds.has(carInScene.id)) {
+            scene.removeObject(carInScene);
+        }
     }
 
+    // Agregar carros nuevos y actualizar los existentes
+    for (const car of cars) {
+        if (!car.vao && carModels.length > 0) {
+            const randomCarModel = carModels[Math.floor(Math.random() * carModels.length)];
+            car.arrays = randomCarModel.arrays;
+            car.bufferInfo = randomCarModel.bufferInfo;
+            car.vao = randomCarModel.vao;
+            car.scale = { x: 0.002 * GLOBAL_SCALE, y: 0.002 * GLOBAL_SCALE, z: 0.0015 * GLOBAL_SCALE };
+            car.currentRotY = 0;
+            car.targetRotY = 0;
+            scene.addObject(car);
+        }
+
+        updateCarRotation(car);
+    }
+}
+
+// Interpola posiciones de carros usando triple buffer
+// Va de la posicion actual hacia la futura para movimiento suave
+function interpolateCars(fract) {
+    const t = smoothstep(fract);
+
+    for (const car of cars) {
+        if (!car.oldPosArray) continue;
+
+        const oldPos = car.oldPosArray;
+        const currentPos = car.posArray;
+
+        // Posicion futura, si no hay se extrapola de la velocidad
+        let futureX, futureZ;
+        if (car.futurePos) {
+            futureX = car.futurePos.x;
+            futureZ = car.futurePos.z;
+        } else {
+            futureX = currentPos[0] + (currentPos[0] - oldPos[0]);
+            futureZ = currentPos[2] + (currentPos[2] - oldPos[2]);
+        }
+
+        // Velocidades de entrada y salida para Hermite
+        const v0x = currentPos[0] - oldPos[0];
+        const v0z = currentPos[2] - oldPos[2];
+        const v1x = futureX - currentPos[0];
+        const v1z = futureZ - currentPos[2];
+
+        const interpX = hermiteInterp(currentPos[0], futureX, v0x, v1x, t);
+        const interpZ = hermiteInterp(currentPos[2], futureZ, v0z, v1z, t);
+        const interpY = lerp(currentPos[1], currentPos[1], t);
+
+        car.renderPos = {
+            x: interpX,
+            y: interpY + CAR_Y_OFFSET,
+            z: interpZ + CAR_Z_OFFSET
+        };
+
+        if (car.targetRotY !== undefined) {
+            car.currentRotY = lerpAngle(car.currentRotY || 0, car.targetRotY, Math.min(t * 2, 1.0));
+            car.rotRad.y = car.currentRotY;
+        }
+    }
+}
+
+// Actualiza el color de las cubos de los semaforos
+function updateTrafficLightSpheres() {
+    for (const light of trafficLights) {
+        const sphere = trafficLightSpheres.get(light.id);
+        if (sphere) {
+            sphere.color = light.state ? [0.2, 1.0, 0.2, 1.0] : [1.0, 0.2, 0.1, 1.0];
+            sphere.diffuseColor = light.state ? [0.3, 1.2, 0.3, 1.0] : [1.2, 0.3, 0.15, 1.0];
+            sphere.ambientColor = light.state ? [0.1, 0.5, 0.1, 1.0] : [0.5, 0.1, 0.05, 1.0];
+        }
+    }
+}
+
+// Dibuja un objeto con sus transformaciones y iluminacion Phong
+function drawObject(gl, programInfo, object, viewProjectionMatrix, fract) {
+    // Para carros usa renderPos (interpolado), sino usa posArray
+    let v3_tra = object.renderPos
+        ? [object.renderPos.x, object.renderPos.y, object.renderPos.z]
+        : object.posArray;
     let v3_sca = object.scaArray;
 
-    // Create the individual transform matrices
+    // Matrices de transformacion
     const scaMat = M4.scale(v3_sca);
     const rotXMat = M4.rotationX(object.rotRad.x);
     const rotYMat = M4.rotationY(object.rotRad.y);
     const rotZMat = M4.rotationZ(object.rotRad.z);
     const traMat = M4.translation(v3_tra);
 
-    // Create the composite world matrix (local to world space)
+    // Matriz mundo compuesta (de espacio local a mundo)
     let worldMatrix = M4.identity();
     worldMatrix = M4.multiply(scaMat, worldMatrix);
     worldMatrix = M4.multiply(rotXMat, worldMatrix);
@@ -375,43 +633,36 @@ function drawObject(gl, programInfo, object, viewProjectionMatrix, lights, fract
 
     object.matrix = worldMatrix;
 
-    // Calculate world-view-projection matrix
     const worldViewProjection = M4.multiply(viewProjectionMatrix, worldMatrix);
-
-    // Calculate inverse transpose for normals
     const worldInverseTransform = M4.transpose(M4.inverse(worldMatrix));
 
-    // Get material properties (from MTL or defaults)
-    const ambientColor = object.ambientColor || [0.2, 0.2, 0.2, 1.0];
+    // Propiedades del material
+    const ambientColor = object.ambientColor || [0.4, 0.4, 0.4, 1.0];
     const diffuseColor = object.diffuseColor || object.color || [0.8, 0.8, 0.8, 1.0];
-    const specularColor = object.specularColor || [1.0, 1.0, 1.0, 1.0];
-    const shininess = object.shininess || 100;
+    const specularColor = object.specularColor || [0.8, 0.8, 0.8, 1.0];
+    const shininess = object.shininess || 32;
 
-    // Phong lighting uniforms with multiple lights
+    // Arrays de luces para el shader
+    const numLights = lightingConfig.lights.length;
+    const lightPositions = lightingConfig.lights.flatMap(l => l.position);
+    const lightColors = lightingConfig.lights.flatMap(l => l.color);
+    const lightIntensities = lightingConfig.lights.map(l => l.intensity);
+
     let objectUniforms = {
-        // Matrices
         u_world: worldMatrix,
         u_worldInverseTransform: worldInverseTransform,
         u_worldViewProjection: worldViewProjection,
-
-        // Camera position
         u_viewWorldPosition: scene.camera.posArray,
-
-        // Ambient light
         u_ambientLight: lightingConfig.ambientLight,
-
-        // Multiple lights
-        u_numLights: lights.count,
-        u_lightPositions: lights.positions,
-        u_lightColors: lights.colors,
-        u_lightIntensities: lights.intensities,
-
-        // Material properties
+        u_numLights: numLights,
+        u_lightPositions: lightPositions,
+        u_lightColors: lightColors,
+        u_lightIntensities: lightIntensities,
         u_ambientColor: ambientColor,
         u_diffuseColor: diffuseColor,
         u_specularColor: specularColor,
         u_shininess: shininess,
-        u_useVertexColor: object.useVertexColor || false
+        u_useVertexColor: object.useVertexColor !== false
     };
 
     twgl.setUniforms(programInfo, objectUniforms);
@@ -420,59 +671,47 @@ function drawObject(gl, programInfo, object, viewProjectionMatrix, lights, fract
     twgl.drawBufferInfo(gl, object.bufferInfo);
 }
 
-// Function to do the actual display of the objects
+// Loop principal de dibujado
 async function drawScene() {
-    // Compute time elapsed since last frame
     let now = Date.now();
     let deltaTime = now - then;
     elapsed += deltaTime;
+    let fract = Math.min(1.0, elapsed / duration);
     then = now;
 
-    // Calculate interpolation fraction (0 to 1)
-    let fract = Math.min(1.0, elapsed / duration);
-
-    // Clear the canvas
-    gl.clearColor(0.1, 0.1, 0.15, 1);
+    // Color de fondo tipo atardecer
+    gl.clearColor(0.45, 0.25, 0.35, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-    // Enable face culling and depth testing
     gl.enable(gl.CULL_FACE);
     gl.enable(gl.DEPTH_TEST);
 
     scene.camera.checkKeys();
     const viewProjectionMatrix = setupViewProjection(gl);
 
-    // Build lights array (sun + traffic lights)
-    const lights = buildLightsArray();
+    interpolateCars(fract);
 
-    // Draw the objects with Phong lighting
     gl.useProgram(phongProgramInfo.program);
     for (let object of scene.objects) {
-        drawObject(gl, phongProgramInfo, object, viewProjectionMatrix, lights, fract);
+        drawObject(gl, phongProgramInfo, object, viewProjectionMatrix, fract);
     }
 
-    // Update the scene after the elapsed duration
+    // Cuando pasa el tiempo de duracion, actualizar desde el servidor
     if (elapsed >= duration) {
         elapsed = 0;
         await update();
-        // Setup new cars and update rotations
-        for (const car of cars) {
-            setupCar(car);
-            setCarRotation(car);
-        }
+        updateCars();
+        updateTrafficLightSpheres();
     }
 
     requestAnimationFrame(drawScene);
 }
 
 function setupViewProjection(gl) {
-    // Field of view of 60 degrees vertically, in radians
-    const fov = 60 * Math.PI / 180;
+    const fov = 60 * Math.PI / 180; // 60 grados de campo de vision
     const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
 
-    // Matrices for the world view
     const projectionMatrix = M4.perspective(fov, aspect, 1, 200);
-
     const cameraPosition = scene.camera.posArray;
     const target = scene.camera.targetArray;
     const up = [0, 1, 0];
@@ -484,14 +723,11 @@ function setupViewProjection(gl) {
     return viewProjectionMatrix;
 }
 
-// Setup UI with camera controls
+// Controles de camara con lil-gui
 function setupUI() {
     const gui = new GUI();
+    const cameraFolder = gui.addFolder('Controles de Camara');
 
-    // Camera controls folder
-    const cameraFolder = gui.addFolder('Camera Controls');
-
-    // Camera settings object
     const cameraSettings = {
         distance: scene.camera.distance,
         azimuth: scene.camera.azimuth,
@@ -500,7 +736,6 @@ function setupUI() {
         targetY: scene.camera.target.y,
         targetZ: scene.camera.target.z,
         reset: function () {
-            // Reset to default values
             this.distance = 30;
             this.azimuth = 4;
             this.elevation = 0.6;
@@ -511,7 +746,6 @@ function setupUI() {
         }
     };
 
-    // Update camera function
     const updateCamera = () => {
         scene.camera.distance = cameraSettings.distance;
         scene.camera.azimuth = cameraSettings.azimuth;
@@ -521,43 +755,36 @@ function setupUI() {
         scene.camera.target.z = cameraSettings.targetZ;
     };
 
-    // Distance slider
     cameraFolder.add(cameraSettings, 'distance', 5, 100, 1)
-        .name('Distance')
+        .name('Distancia')
         .onChange(updateCamera);
 
-    // Azimuth slider (horizontal rotation)
     cameraFolder.add(cameraSettings, 'azimuth', 0, Math.PI * 2, 0.1)
-        .name('Azimuth (H)')
+        .name('A z ')
         .onChange(updateCamera);
 
-    // Elevation slider (vertical rotation)
     cameraFolder.add(cameraSettings, 'elevation', 0, Math.PI / 2, 0.1)
-        .name('Elevation (V)')
+        .name('Elevacion')
         .onChange(updateCamera);
 
-    // Target position controls
-    const targetFolder = cameraFolder.addFolder('Target Position');
+    const targetFolder = cameraFolder.addFolder('Posicion Objetivo');
 
     targetFolder.add(cameraSettings, 'targetX', 0, 24, 0.5)
-        .name('Target X')
+        .name('Objetivo X')
         .onChange(updateCamera);
 
     targetFolder.add(cameraSettings, 'targetY', -5, 10, 0.5)
-        .name('Target Y')
+        .name('Objetivo Y')
         .onChange(updateCamera);
 
     targetFolder.add(cameraSettings, 'targetZ', 0, 24, 0.5)
-        .name('Target Z')
+        .name('Objetivo Z')
         .onChange(updateCamera);
 
-    // Reset button
-    cameraFolder.add(cameraSettings, 'reset').name('Reset Camera');
-
-    // Open camera folder by default
+    cameraFolder.add(cameraSettings, 'reset').name('Reiniciar Camara');
     cameraFolder.open();
 
-    console.log("Traffic visualization initialized with camera controls");
+    console.log("Visualizacion de trafico inicializada");
 }
 
 main();

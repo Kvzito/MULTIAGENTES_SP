@@ -1,5 +1,6 @@
 *{
   font-family: Verdana, Geneva, Tahoma, sans-serif;
+  color: aliceblue;
 }
 
 body {
@@ -22,7 +23,7 @@ body {
 
 #headerContainer{
   grid-area: header;
-  background-color: HotPink;
+  background-color: rgb(17, 17, 78);
   width: 100%;
   height: 100%;
   margin: 0;
@@ -37,15 +38,15 @@ h1{
 }
 
 canvas {
-    width: 75vw;
-    height: 75vh;
-    border: 1px solid black;
+    width: 95vw;
+    height: 85vh;
+    border: 1px solid rgb(251, 250, 250);
     /* width: 600px; */
     /* height: 600px; */
 }
 
 #canvas {
-  background-color: White;
+  background-color: rgb(89, 84, 84);
   grid-area: main;
 }
 

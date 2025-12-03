@@ -23,6 +23,24 @@ class Scene3D {
     addObject(object) {
         this.objects.push(object);
     }
+
+    removeObject(object) {
+        const index = this.objects.indexOf(object);
+        if (index > -1) {
+            this.objects.splice(index, 1);
+            return true;
+        }
+        return false;
+    }
+
+    removeObjectById(id) {
+        const index = this.objects.findIndex(obj => obj.id === id);
+        if (index > -1) {
+            this.objects.splice(index, 1);
+            return true;
+        }
+        return false;
+    }
 };
 
 export { Scene3D };

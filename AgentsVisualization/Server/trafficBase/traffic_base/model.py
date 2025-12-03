@@ -13,7 +13,7 @@ class CityModel(Model):
         seed: Random seed for the model
     """
 
-    def __init__(self, N, seed=42):
+    def __init__(self, N, seed=42, spawn_interval=2):
 
         super().__init__(seed=seed)
 
@@ -21,11 +21,13 @@ class CityModel(Model):
         dataDictionary = json.load(open("city_files/mapDictionary.json"))
 
         self.num_agents = N
+        self.spawn_interval = spawn_interval  # How often to spawn cars (in steps)
         self.traffic_lights = []
         self.spawn_points = []  # Will store the 4 corners as spawn points
+        self.destinations = []  # Will store all destination cells
 
         # Load the map file. The map file is a text file where each character represents an agent.
-        with open("city_files/2022_base.txt") as baseFile:
+        with open("city_files/2025_base.txt") as baseFile:
             lines = baseFile.readlines()
             self.width = len(lines[0].strip())  # Remove newline character
             self.height = len(lines)
@@ -57,6 +59,7 @@ class CityModel(Model):
 
                     elif col == "D":
                         agent = Destination(self, cell)
+                        self.destinations.append(cell)
 
         # Identify the 4 corners as potential spawn points
         corners = [
@@ -90,7 +93,7 @@ class CityModel(Model):
         return True
 
     def spawn_car(self):
-        """Try to spawn a car at one of the available corners."""
+        """Spawn cars at ALL available corners simultaneously."""
         # Get available spawn points (corners that are not blocked)
         available_spawns = [
             sp for sp in self.spawn_points
@@ -103,16 +106,19 @@ class CityModel(Model):
             self.running = False
             return
 
-        # Randomly choose one available spawn point
-        spawn = self.random.choice(available_spawns)
+        # Spawn a car at EACH available corner
+        for spawn in available_spawns:
+            # Randomly choose a destination for this car
+            destination = self.random.choice(self.destinations)
 
-        # Create a new car at the spawn point
-        car = Car(self, spawn['cell'])
+            # Create a new car at this spawn point with the assigned destination
+            car = Car(self, spawn['cell'], destination)
 
     def step(self):
         """Advance the model by one step."""
-        # Spawn new cars every 10 steps
-        if self.steps % 10 == 0 and self.steps > 0:
-            self.spawn_car()
-
+        # Execute all agent steps
         self.agents.shuffle_do("step")
+
+        # Spawn new cars based on configured interval
+        if self.steps % self.spawn_interval == 0 and self.steps > 0:
+            self.spawn_car()
