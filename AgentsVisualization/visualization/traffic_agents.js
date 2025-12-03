@@ -68,11 +68,11 @@ let then = 0;
 
 // Configuracion de luces, ambiente tipo atardecer
 const lightingConfig = {
-    ambientLight: [0.4, 0.4, 0.4, 1.0],
+    ambientLight: [0.5, 0.5, 0.5, 1.0],
 
     lights: [
         // Sol principal, bajo y anaranjado
-        { position: [-20, 8, 30], color: [0.5, 0.5, 0.5, 1.0], intensity: 1.2 },
+        { position: [-20, 20, 30], color: [0.5, 0.5, 0.7, 1.0], intensity: 1.2 },
         // Reflejo calido del otro lado
         { position: [40, 5, -10], color: [1.0, 0.35, 0.15, 1.0], intensity: 0.6 },
         // Luz suave del cielo desde arriba
