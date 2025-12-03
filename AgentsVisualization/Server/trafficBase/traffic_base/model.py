@@ -27,7 +27,7 @@ class CityModel(Model):
         self.destinations = []  # Will store all destination cells
 
         # Load the map file. The map file is a text file where each character represents an agent.
-        with open("city_files/2024_base.txt") as baseFile:
+        with open("city_files/2025_base.txt") as baseFile:
             lines = baseFile.readlines()
             self.width = len(lines[0].strip())  # Remove newline character
             self.height = len(lines)
