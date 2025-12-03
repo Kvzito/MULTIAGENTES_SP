@@ -85,16 +85,19 @@ def getCarsEndpoint():
                 if isinstance(agent, Car)
             ]
 
-            carPositions = [
-                {
+            carPositions = []
+            for (coordinate, a) in agents:
+                # Get predicted next position for triple buffering
+                predicted_pos = a.predict_next_position()
+                carPositions.append({
                     "id": str(a.unique_id),
                     "x": coordinate[0],
                     "y": 1,
                     "z": coordinate[1],
-                    "direction": a.get_road_direction()
-                }
-                for (coordinate, a) in agents
-            ]
+                    "direction": a.get_road_direction(),
+                    "futureX": predicted_pos[0],
+                    "futureZ": predicted_pos[1]
+                })
 
             return jsonify({'positions': carPositions})
         except Exception as e:

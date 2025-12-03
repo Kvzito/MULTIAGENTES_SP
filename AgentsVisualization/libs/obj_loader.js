@@ -8,10 +8,11 @@
 
 'use strict';
 
-// Global variable for all materials loaded
-// NOTE: This is a bad idea. When materials have the same names,
-// it could cause confusion in the scene.
-let materials = {};
+// Cache for preloaded models (VAO data)
+const modelCache = new Map();
+
+// Per-model material storage to avoid conflicts
+let currentMaterials = {};
 let materialInUse = undefined;
 
 /*
@@ -132,8 +133,8 @@ function loadObj(objString) {
  * Return an object containing all the materials described inside,
  * with their illumination attributes.
  */
-function loadMtl(mtlString) {
-
+function loadMtl(mtlString, targetMaterials = null) {
+    const materials = targetMaterials || currentMaterials;
     let currentMtl = {};
 
     let partInfo;
@@ -149,9 +150,17 @@ function loadMtl(mtlString) {
             case 'Ns':  // Specular coefficient ("Shininess")
                 currentMtl['Ns'] = Number(parts[1]);
                 break;
-            case 'Kd':  // The specular color
+            case 'Ka':  // Ambient color
+                partInfo = parts.slice(1).filter(v => v != '').map(Number);
+                currentMtl['Ka'] = partInfo;
+                break;
+            case 'Kd':  // Diffuse color
                 partInfo = parts.slice(1).filter(v => v != '').map(Number);
                 currentMtl['Kd'] = partInfo;
+                break;
+            case 'Ks':  // Specular color
+                partInfo = parts.slice(1).filter(v => v != '').map(Number);
+                currentMtl['Ks'] = partInfo;
                 break;
         }
     });
@@ -159,4 +168,146 @@ function loadMtl(mtlString) {
     return materials;
 }
 
-export { loadObj, loadMtl };
+/*
+ * Load OBJ with its MTL file, using isolated materials per model
+ * Returns arrays ready for VAO creation
+ * brightnessMultiplier: multiplies color values (1.0 = original, 1.5 = 50% brighter)
+ */
+function loadObjWithMtl(objString, mtlString = null, brightnessMultiplier = 1.0) {
+    // Create isolated materials for this model
+    const modelMaterials = {};
+
+    if (mtlString) {
+        loadMtl(mtlString, modelMaterials);
+    }
+
+    // Initialize a dummy item in the lists as index 0
+    let objData = {
+        vertices: [ [0, 0, 0] ],
+        normals: [ [0, 0, 0] ],
+        textures: [ [0, 0, 0] ],
+        faces: [ ],
+    };
+
+    let arrays = {
+        a_position: { numComponents: 3, data: [ ] },
+        a_color: { numComponents: 4, data: [ ] },
+        a_normal: { numComponents: 3, data: [ ] },
+        a_texCoord: { numComponents: 2, data: [ ] }
+    };
+
+    let activeMaterial = null;
+
+    let lines = objString.split('\n');
+    lines.forEach(line => {
+        let parts = line.split(/\s+/);
+        switch (parts[0]) {
+            case 'v':
+                let vertInfo = parts.slice(1).filter(v => v != '').map(Number);
+                objData.vertices.push(vertInfo);
+                break;
+            case 'vn':
+                let normInfo = parts.slice(1).filter(vn => vn != '').map(Number);
+                objData.normals.push(normInfo);
+                break;
+            case 'vt':
+                let texInfo = parts.slice(1).filter(f => f != '').map(Number);
+                objData.textures.push(texInfo);
+                break;
+            case 'f':
+                // Parse face with current material
+                let faceVerts = parts.slice(1).map(face => face.split('/'));
+                faceVerts.forEach(vert => {
+                    const vertex = vert[0] != '' ? Number(vert[0]) : undefined;
+                    if (vertex != undefined) {
+                        arrays.a_position.data.push(...objData.vertices[vert[0]]);
+
+                        if (vert.length > 1 && vert[1] != "") {
+                            arrays.a_texCoord.data.push(...objData.textures[vert[1]]);
+                        }
+                        if (vert.length > 2 && vert[2] != "") {
+                            arrays.a_normal.data.push(...objData.normals[vert[2]]);
+                        }
+
+                        // Apply material color with brightness multiplier (preserves color ratios)
+                        if (activeMaterial && activeMaterial['Kd']) {
+                            const kd = activeMaterial['Kd'];
+                            const r = Math.min(1.0, kd[0] * brightnessMultiplier);
+                            const g = Math.min(1.0, kd[1] * brightnessMultiplier);
+                            const b = Math.min(1.0, kd[2] * brightnessMultiplier);
+                            arrays.a_color.data.push(r, g, b, 1);
+                        } else {
+                            arrays.a_color.data.push(0.6, 0.6, 0.6, 1);
+                        }
+
+                        objData.faces.push({v: vert[0], t: vert[1], n: vert[2]});
+                    }
+                });
+                break;
+            case 'usemtl':
+                if (modelMaterials.hasOwnProperty(parts[1])) {
+                    activeMaterial = modelMaterials[parts[1]];
+                }
+                break;
+        }
+    });
+
+    return arrays;
+}
+
+/*
+ * Preload model and cache its VAO data
+ */
+async function preloadModel(gl, programInfo, basePath, modelName, brightnessBoost = 0.3) {
+    const cacheKey = `${modelName}_${brightnessBoost}`;
+
+    if (modelCache.has(cacheKey)) {
+        return modelCache.get(cacheKey);
+    }
+
+    try {
+        // Load OBJ file
+        const objResponse = await fetch(`${basePath}${modelName}.obj`);
+        if (!objResponse.ok) {
+            console.error(`Error loading ${modelName}.obj`);
+            return null;
+        }
+        const objText = await objResponse.text();
+
+        // Try to load MTL file
+        let mtlText = null;
+        try {
+            const mtlResponse = await fetch(`${basePath}${modelName}.mtl`);
+            if (mtlResponse.ok) {
+                mtlText = await mtlResponse.text();
+            }
+        } catch (e) {
+            console.warn(`No MTL file for ${modelName}`);
+        }
+
+        // Parse and create buffers
+        const arrays = loadObjWithMtl(objText, mtlText, brightnessBoost);
+        const twgl = await import('twgl-base.js');
+        const bufferInfo = twgl.createBufferInfoFromArrays(gl, arrays);
+        const vao = twgl.createVAOFromBufferInfo(gl, programInfo, bufferInfo);
+
+        const cachedModel = { arrays, bufferInfo, vao };
+        modelCache.set(cacheKey, cachedModel);
+
+        console.log(`✅ Model preloaded: ${modelName}`);
+        return cachedModel;
+    } catch (error) {
+        console.error(`Error preloading ${modelName}:`, error);
+        return null;
+    }
+}
+
+/*
+ * Get cached model (must be preloaded first)
+ */
+function getCachedModel(modelName, brightnessBoost = 0.3) {
+    const cacheKey = `${modelName}_${brightnessBoost}`;
+    return modelCache.get(cacheKey) || null;
+}
+
+export { loadObj, loadMtl, loadObjWithMtl, preloadModel, getCachedModel, modelCache };
