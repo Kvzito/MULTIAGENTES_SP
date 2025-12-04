@@ -62,7 +62,7 @@ const scene = new Scene3D();
 // Variables globales
 let phongProgramInfo = undefined;
 let gl = undefined;
-const duration = 800; // milisegundos entre cada actualizacion
+const duration = 500; // milisegundos entre cada actualizacion
 let elapsed = 0;
 let then = 0;
 
@@ -488,31 +488,6 @@ function lerpAngle(start, end, t) {
     return start + diff * t;
 }
 
-// Ease-in-out para que el movimiento se vea mas natural
-function smoothstep(t) {
-    return t * t * (3 - 2 * t);
-}
-
-// Interpolacion Hermite, hace curvas suaves usando velocidades
-// FUNCION : hermiteInterp(p0, p1, v0, v1, t)
-// p0: posicion inicial
-// p1: posicion final
-// v0: velocidad inicial
-// v1: velocidad final
-// t: parametro de interpolacion [0, 1]
-// RETORNA: valor interpolado
-function hermiteInterp(p0, p1, v0, v1, t) {
-    const t2 = t * t;
-    const t3 = t2 * t;
-
-    const h00 = 2*t3 - 3*t2 + 1;
-    const h10 = t3 - 2*t2 + t;
-    const h01 = -2*t3 + 3*t2;
-    const h11 = t3 - t2;
-
-    return h00 * p0 + h10 * v0 + h01 * p1 + h11 * v1;
-}
-
 function updateCarRotation(car) {
     if (car.direction && DIRECTION_ROTATIONS.hasOwnProperty(car.direction)) {
         car.targetRotY = DIRECTION_ROTATIONS[car.direction];
@@ -552,36 +527,19 @@ function updateCars() {
     }
 }
 
-// Interpola posiciones de carros usando triple buffer
-// Va de la posicion actual hacia la futura para movimiento suave
+// Interpola posiciones de carros usando doble buffer
+// Interpolacion lineal simple de oldPos a currentPos
 function interpolateCars(fract) {
-    const t = smoothstep(fract);
-
     for (const car of cars) {
         if (!car.oldPosArray) continue;
 
         const oldPos = car.oldPosArray;
         const currentPos = car.posArray;
 
-        // Posicion futura, si no hay se extrapola de la velocidad
-        let futureX, futureZ;
-        if (car.futurePos) {
-            futureX = car.futurePos.x;
-            futureZ = car.futurePos.z;
-        } else {
-            futureX = currentPos[0] + (currentPos[0] - oldPos[0]);
-            futureZ = currentPos[2] + (currentPos[2] - oldPos[2]);
-        }
-
-        // Velocidades de entrada y salida para Hermite
-        const v0x = currentPos[0] - oldPos[0];
-        const v0z = currentPos[2] - oldPos[2];
-        const v1x = futureX - currentPos[0];
-        const v1z = futureZ - currentPos[2];
-
-        const interpX = hermiteInterp(currentPos[0], futureX, v0x, v1x, t);
-        const interpZ = hermiteInterp(currentPos[2], futureZ, v0z, v1z, t);
-        const interpY = lerp(currentPos[1], currentPos[1], t);
+        // Interpolacion lineal simple entre posicion anterior y actual
+        const interpX = lerp(oldPos[0], currentPos[0], fract);
+        const interpZ = lerp(oldPos[2], currentPos[2], fract);
+        const interpY = currentPos[1];
 
         car.renderPos = {
             x: interpX,
@@ -590,7 +548,7 @@ function interpolateCars(fract) {
         };
 
         if (car.targetRotY !== undefined) {
-            car.currentRotY = lerpAngle(car.currentRotY || 0, car.targetRotY, Math.min(t * 2, 1.0));
+            car.currentRotY = lerpAngle(car.currentRotY || 0, car.targetRotY, Math.min(fract * 2, 1.0));
             car.rotRad.y = car.currentRotY;
         }
     }

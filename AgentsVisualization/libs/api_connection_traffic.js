@@ -73,19 +73,15 @@ async function getCars() {
                 const current_car = cars.find((object3d) => object3d.id == car.id);
 
                 if (current_car != undefined) {
-                    // Triple buffering: old <- current, current <- new, future from server
+                    // Double buffering: old <- current, current <- new
                     current_car.oldPosArray = current_car.posArray;
                     current_car.position = { x: car.x, y: car.y, z: car.z };
                     current_car.direction = car.direction;
-                    // Store future position for smoother interpolation
-                    current_car.futurePos = { x: car.futureX, y: car.y, z: car.futureZ };
                 } else {
                     // Coche nuevo: agregar al array
                     const newCar = new Object3D(car.id, [car.x, car.y, car.z]);
                     newCar['oldPosArray'] = newCar.posArray;
                     newCar['direction'] = car.direction;
-                    // Initialize future position same as current
-                    newCar['futurePos'] = { x: car.futureX, y: car.y, z: car.futureZ };
                     newCar.color = [1.0, 0.0, 0.0, 1.0];
                     cars.push(newCar);
                 }
