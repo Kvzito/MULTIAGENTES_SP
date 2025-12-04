@@ -15,9 +15,9 @@ import { preloadModel } from '../libs/obj_loader.js';
 
 // Comunicacion con la API del servidor
 import {
-    cars, obstacles, trafficLights, roads, destinations,
+    cars, obstacles, trafficLights, roads, destinations, metrics,
     initTrafficModel, update, getCars, getObstacles,
-    getTrafficLights, getRoads, getDestinations
+    getTrafficLights, getRoads, getDestinations, getMetrics, setSpawnInterval
 } from '../libs/api_connection_traffic.js';
 
 // Shaders para iluminacion Phong
@@ -62,7 +62,7 @@ const scene = new Scene3D();
 // Variables globales
 let phongProgramInfo = undefined;
 let gl = undefined;
-const duration = 800; // milisegundos entre cada actualizacion
+const duration = 500; // milisegundos entre cada actualizacion
 let elapsed = 0;
 let then = 0;
 
@@ -125,10 +125,17 @@ async function main() {
     await getTrafficLights();
     await getRoads();
     await getDestinations();
+    await getMetrics();
 
     setupScene();
     setupObjects(scene, gl, phongProgramInfo);
     setupUI();
+
+    // Actualizar metricas iniciales en la UI
+    if (window.updateMetricsUI) {
+        window.updateMetricsUI();
+    }
+
     drawScene();
 }
 
@@ -488,33 +495,19 @@ function lerpAngle(start, end, t) {
     return start + diff * t;
 }
 
-// Ease-in-out para que el movimiento se vea mas natural
-function smoothstep(t) {
-    return t * t * (3 - 2 * t);
-}
-
-// Interpolacion Hermite, hace curvas suaves usando velocidades
-// FUNCION : hermiteInterp(p0, p1, v0, v1, t)
-// p0: posicion inicial
-// p1: posicion final
-// v0: velocidad inicial
-// v1: velocidad final
-// t: parametro de interpolacion [0, 1]
-// RETORNA: valor interpolado
-function hermiteInterp(p0, p1, v0, v1, t) {
-    const t2 = t * t;
-    const t3 = t2 * t;
-
-    const h00 = 2*t3 - 3*t2 + 1;
-    const h10 = t3 - 2*t2 + t;
-    const h01 = -2*t3 + 3*t2;
-    const h11 = t3 - t2;
-
-    return h00 * p0 + h10 * v0 + h01 * p1 + h11 * v1;
-}
-
 function updateCarRotation(car) {
-    if (car.direction && DIRECTION_ROTATIONS.hasOwnProperty(car.direction)) {
+    // Calcular rotacion basada en el movimiento real, no en la direccion de la calle
+    if (car.oldPosArray && car.posArray) {
+        const dx = car.posArray[0] - car.oldPosArray[0];
+        const dz = car.posArray[2] - car.oldPosArray[2];
+
+        // Solo actualizar si hay movimiento significativo
+        if (Math.abs(dx) > 0.01 || Math.abs(dz) > 0.01) {
+            // Calcular angulo basado en la direccion del movimiento
+            car.targetRotY = Math.atan2(dx, dz);
+        }
+    } else if (car.direction && DIRECTION_ROTATIONS.hasOwnProperty(car.direction)) {
+        // Fallback para carros nuevos sin posicion anterior
         car.targetRotY = DIRECTION_ROTATIONS[car.direction];
     }
 }
@@ -552,36 +545,19 @@ function updateCars() {
     }
 }
 
-// Interpola posiciones de carros usando triple buffer
-// Va de la posicion actual hacia la futura para movimiento suave
+// Interpola posiciones de carros usando doble buffer
+// Interpolacion lineal simple de oldPos a currentPos
 function interpolateCars(fract) {
-    const t = smoothstep(fract);
-
     for (const car of cars) {
         if (!car.oldPosArray) continue;
 
         const oldPos = car.oldPosArray;
         const currentPos = car.posArray;
 
-        // Posicion futura, si no hay se extrapola de la velocidad
-        let futureX, futureZ;
-        if (car.futurePos) {
-            futureX = car.futurePos.x;
-            futureZ = car.futurePos.z;
-        } else {
-            futureX = currentPos[0] + (currentPos[0] - oldPos[0]);
-            futureZ = currentPos[2] + (currentPos[2] - oldPos[2]);
-        }
-
-        // Velocidades de entrada y salida para Hermite
-        const v0x = currentPos[0] - oldPos[0];
-        const v0z = currentPos[2] - oldPos[2];
-        const v1x = futureX - currentPos[0];
-        const v1z = futureZ - currentPos[2];
-
-        const interpX = hermiteInterp(currentPos[0], futureX, v0x, v1x, t);
-        const interpZ = hermiteInterp(currentPos[2], futureZ, v0z, v1z, t);
-        const interpY = lerp(currentPos[1], currentPos[1], t);
+        // Interpolacion lineal simple entre posicion anterior y actual
+        const interpX = lerp(oldPos[0], currentPos[0], fract);
+        const interpZ = lerp(oldPos[2], currentPos[2], fract);
+        const interpY = currentPos[1];
 
         car.renderPos = {
             x: interpX,
@@ -590,7 +566,7 @@ function interpolateCars(fract) {
         };
 
         if (car.targetRotY !== undefined) {
-            car.currentRotY = lerpAngle(car.currentRotY || 0, car.targetRotY, Math.min(t * 2, 1.0));
+            car.currentRotY = lerpAngle(car.currentRotY || 0, car.targetRotY, Math.min(fract * 2, 1.0));
             car.rotRad.y = car.currentRotY;
         }
     }
@@ -702,6 +678,10 @@ async function drawScene() {
         await update();
         updateCars();
         updateTrafficLightSpheres();
+        // Actualizar metricas en la UI
+        if (window.updateMetricsUI) {
+            window.updateMetricsUI();
+        }
     }
 
     requestAnimationFrame(drawScene);
@@ -726,6 +706,49 @@ function setupViewProjection(gl) {
 // Controles de camara con lil-gui
 function setupUI() {
     const gui = new GUI();
+
+    // Panel de Metricas de Simulacion
+    const metricsFolder = gui.addFolder('Metricas de Simulacion');
+
+    const metricsDisplay = {
+        step: 0,
+        spawned: 0,
+        arrived: 0,
+        active: 0
+    };
+
+    // Controladores para mostrar los valores (solo lectura)
+    metricsFolder.add(metricsDisplay, 'step')
+        .name('Paso Actual')
+        .listen()
+        .disable();
+
+    metricsFolder.add(metricsDisplay, 'spawned')
+        .name('Total Spawneados')
+        .listen()
+        .disable();
+
+    metricsFolder.add(metricsDisplay, 'arrived')
+        .name('Llegaron a Destino')
+        .listen()
+        .disable();
+
+    metricsFolder.add(metricsDisplay, 'active')
+        .name('Carros Activos')
+        .listen()
+        .disable();
+
+    metricsFolder.open();
+
+    // Funcion para actualizar metricas en el UI
+    window.updateMetricsUI = () => {
+        metricsDisplay.step = metrics.current_step;
+        metricsDisplay.spawned = metrics.total_spawned;
+        metricsDisplay.arrived = metrics.total_reached_destination;
+        metricsDisplay.active = metrics.current_active_cars;
+    };
+
+    // Controles de Camara
     const cameraFolder = gui.addFolder('Controles de Camara');
 
     const cameraSettings = {
@@ -760,7 +783,7 @@ function setupUI() {
         .onChange(updateCamera);
 
     cameraFolder.add(cameraSettings, 'azimuth', 0, Math.PI * 2, 0.1)
-        .name('A z ')
+        .name('Azimut')
         .onChange(updateCamera);
 
     cameraFolder.add(cameraSettings, 'elevation', 0, Math.PI / 2, 0.1)

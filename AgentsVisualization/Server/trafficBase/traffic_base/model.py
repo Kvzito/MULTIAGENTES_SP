@@ -14,7 +14,7 @@ class CityModel(Model):
         seed: Random seed for the model
     """
 
-    def __init__(self, N, seed=42, spawn_interval=10):
+    def __init__(self, N, seed=42, spawn_interval=1):
 
         super().__init__(seed=seed)
 

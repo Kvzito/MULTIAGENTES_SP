@@ -27,3 +27,6 @@ temp/
 node_modules
 node
 npm
+.claude
+node_modules/
+

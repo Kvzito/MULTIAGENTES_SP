@@ -18,6 +18,15 @@ const trafficLights = [];
 const roads = [];
 const destinations = [];
 
+// Object to store simulation metrics
+const metrics = {
+    total_spawned: 0,
+    total_reached_destination: 0,
+    current_active_cars: 0,
+    current_step: 0,
+    spawn_interval: 1
+};
+
 
 // Define the data object
 const initData = {
@@ -73,19 +82,15 @@ async function getCars() {
                 const current_car = cars.find((object3d) => object3d.id == car.id);
 
                 if (current_car != undefined) {
-                    // Triple buffering: old <- current, current <- new, future from server
+                    // Double buffering: old <- current, current <- new
                     current_car.oldPosArray = current_car.posArray;
                     current_car.position = { x: car.x, y: car.y, z: car.z };
                     current_car.direction = car.direction;
-                    // Store future position for smoother interpolation
-                    current_car.futurePos = { x: car.futureX, y: car.y, z: car.futureZ };
                 } else {
                     // Coche nuevo: agregar al array
                     const newCar = new Object3D(car.id, [car.x, car.y, car.z]);
                     newCar['oldPosArray'] = newCar.posArray;
                     newCar['direction'] = car.direction;
-                    // Initialize future position same as current
-                    newCar['futurePos'] = { x: car.futureX, y: car.y, z: car.futureZ };
                     newCar.color = [1.0, 0.0, 0.0, 1.0];
                     cars.push(newCar);
                 }
@@ -199,6 +204,49 @@ async function getDestinations() {
 }
 
 /**
+ * Retrieves the current simulation metrics from the server.
+ */
+async function getMetrics() {
+    try {
+        let response = await fetch(agent_server_uri + "getMetrics");
+
+        if (response.ok) {
+            let result = await response.json();
+            metrics.total_spawned = result.metrics.total_spawned;
+            metrics.total_reached_destination = result.metrics.total_reached_destination;
+            metrics.current_active_cars = result.metrics.current_active_cars;
+            metrics.current_step = result.metrics.current_step;
+            metrics.spawn_interval = result.metrics.spawn_interval;
+        }
+
+    } catch (error) {
+        console.log(error);
+    }
+}
+
+/**
+ * Sets the spawn interval on the server.
+ */
+async function setSpawnInterval(interval) {
+    try {
+        let response = await fetch(agent_server_uri + "setSpawnInterval", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ spawn_interval: interval })
+        });
+
+        if (response.ok) {
+            let result = await response.json();
+            metrics.spawn_interval = result.spawn_interval;
+            console.log(result.message);
+        }
+
+    } catch (error) {
+        console.log(error);
+    }
+}
+
+/**
  * Updates the traffic model by sending a request to the server.
  */
 async function update() {
@@ -208,6 +256,7 @@ async function update() {
         if (response.ok) {
             await getCars();
             await getTrafficLights();
+            await getMetrics();
         }
 
     } catch (error) {
@@ -221,11 +270,14 @@ export {
     trafficLights,
     roads,
     destinations,
+    metrics,
     initTrafficModel,
     update,
     getCars,
     getObstacles,
     getTrafficLights,
     getRoads,
-    getDestinations
+    getDestinations,
+    getMetrics,
+    setSpawnInterval
 };
