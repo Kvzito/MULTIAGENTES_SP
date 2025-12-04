@@ -27,6 +27,6 @@ temp/
 node_modules
 node
 npm
-.claude
+.claude/
 node_modules/
 

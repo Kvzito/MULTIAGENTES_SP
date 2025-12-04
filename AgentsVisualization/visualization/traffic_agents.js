@@ -43,11 +43,12 @@ let treeModel = null;
 const trafficLightSpheres = new Map();
 
 // Rotaciones segun la direccion del carro
+// Los modelos de carros miran hacia -Z, asi que hay que rotar 180 grados
 const DIRECTION_ROTATIONS = {
-    'Up': Math.PI,
-    'Down': 0,
-    'Left': Math.PI / 2,
-    'Right': -Math.PI / 2
+    'Up': 0,
+    'Down': Math.PI,
+    'Left': -Math.PI / 2,
+    'Right': Math.PI / 2
 };
 
 // Escala global, si quieres hacer todo mas grande solo sube este numero
@@ -504,7 +505,8 @@ function updateCarRotation(car) {
         // Solo actualizar si hay movimiento significativo
         if (Math.abs(dx) > 0.01 || Math.abs(dz) > 0.01) {
             // Calcular angulo basado en la direccion del movimiento
-            car.targetRotY = Math.atan2(dx, dz);
+            // Sumar PI porque los modelos miran hacia -Z (de frente)
+            car.targetRotY = Math.atan2(dx, dz) + Math.PI;
         }
     } else if (car.direction && DIRECTION_ROTATIONS.hasOwnProperty(car.direction)) {
         // Fallback para carros nuevos sin posicion anterior
