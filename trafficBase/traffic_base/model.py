@@ -1,5 +1,6 @@
 from mesa import Model
 from mesa.discrete_space import OrthogonalMooreGrid
+from mesa.datacollection import DataCollector
 from .agent import *
 import json
 
@@ -26,8 +27,22 @@ class CityModel(Model):
         self.spawn_points = []  # Will store the 4 corners as spawn points
         self.destinations = []  # Will store all destination cells
 
+        # Metrics
+        self.total_spawned = 0  # Total cars spawned during simulation
+        self.total_reached_destination = 0  # Total cars that reached destination
+        self.current_active_cars = 0  # Current number of cars in simulation
+
+        # Data collector for visualization
+        self.datacollector = DataCollector(
+            model_reporters={
+                "Total Spawneados": lambda m: m.total_spawned,
+                "Llegaron a Destino": lambda m: m.total_reached_destination,
+                "Activos Actualmente": lambda m: m.current_active_cars,
+            }
+        )
+
         # Load the map file. The map file is a text file where each character represents an agent.
-        with open("city_files/2022_base.txt") as baseFile:
+        with open("city_files/2025_base.txt") as baseFile:
             lines = baseFile.readlines()
             self.width = len(lines[0].strip())  # Remove newline character
             self.height = len(lines)
@@ -114,6 +129,31 @@ class CityModel(Model):
             # Create a new car at this spawn point with the assigned destination
             car = Car(self, spawn['cell'], destination)
 
+            # Update metrics
+            self.total_spawned += 1
+            self.current_active_cars += 1
+
+    def car_reached_destination(self):
+        """Called when a car reaches its destination to update metrics."""
+        self.total_reached_destination += 1
+        self.current_active_cars -= 1
+
+    def get_metrics(self):
+        """Return current simulation metrics."""
+        return {
+            'total_spawned': self.total_spawned,
+            'total_reached_destination': self.total_reached_destination,
+            'current_active_cars': self.current_active_cars
+        }
+
+    def print_metrics(self):
+        """Print current simulation metrics."""
+        print(f"\n=== Simulation Metrics ===")
+        print(f"Total cars spawned: {self.total_spawned}")
+        print(f"Total cars reached destination: {self.total_reached_destination}")
+        print(f"Current active cars: {self.current_active_cars}")
+        print(f"========================\n")
+
     def step(self):
         """Advance the model by one step."""
         # Execute all agent steps
@@ -122,3 +162,6 @@ class CityModel(Model):
         # Spawn new cars based on configured interval
         if self.steps % self.spawn_interval == 0 and self.steps > 0:
             self.spawn_car()
+
+        # Collect data for visualization
+        self.datacollector.collect(self)

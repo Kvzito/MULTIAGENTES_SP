@@ -3,6 +3,7 @@ from traffic_base.model import CityModel
 
 from mesa.visualization import Slider, SolaraViz, make_space_component
 from mesa.visualization.components import AgentPortrayalStyle
+from mesa.visualization import make_plot_component
 
 
 def agent_portrayal(agent):
@@ -26,6 +27,10 @@ def agent_portrayal(agent):
     if isinstance(agent, Obstacle):
         portrayal.color = "#555"
 
+    if isinstance(agent, Car):
+        portrayal.color = "blue"
+        portrayal.size = 15
+
     return portrayal
 
 
@@ -40,6 +45,14 @@ model_params = {
         "value": 42,
         "label": "Random Seed",
     },
+    "spawn_interval": {
+        "type": "SliderInt",
+        "value": 10,
+        "label": "Intervalo de Spawn (steps)",
+        "min": 1,
+        "max": 50,
+        "step": 1,
+    },
 }
 
 model = CityModel(model_params["N"])
@@ -48,9 +61,16 @@ space_component = make_space_component(
     agent_portrayal, draw_grid=False, post_process=post_process
 )
 
+# Create plot components for metrics
+spawned_chart = make_plot_component("Total Spawneados")
+
+destination_chart = make_plot_component("Llegaron a Destino")
+
+active_chart = make_plot_component("Activos Actualmente")
+
 page = SolaraViz(
     model,
-    components=[space_component],
+    components=[space_component, spawned_chart, destination_chart, active_chart],
     model_params=model_params,
-    name="Random Model",
+    name="Traffic Simulation",
 )

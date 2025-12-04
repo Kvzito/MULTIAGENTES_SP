@@ -105,7 +105,13 @@ class Car(CellAgent):
                     next_cell_direction = None
 
                     for agent in next_cell.agents:
-                        if isinstance(agent, (Road, Traffic_Light, Destination)):
+                        if isinstance(agent, Destination):
+                            # Only allow access if this is OUR assigned destination
+                            if next_cell == self.destination:
+                                is_accessible = True
+                            # Otherwise, treat it as an obstacle
+                            break
+                        elif isinstance(agent, (Road, Traffic_Light)):
                             is_accessible = True
                             if isinstance(agent, Road):
                                 next_cell_direction = agent.direction
@@ -221,31 +227,79 @@ class Car(CellAgent):
 
         return adjacent
 
+    def get_diagonal_lane_change_cells(self):
+        """
+        Get diagonal cells for lane changes (advance + lateral movement).
+        Lane changes must be diagonal: moving forward while changing lanes.
+        """
+        x, y = self.cell.coordinate
+        width, height = self.model.grid.dimensions
+        current_direction = self.get_road_direction()
+
+        diagonal_cells = []
+
+        if current_direction == "Up":
+            # Can move diagonally: up-left or up-right
+            for dx in [-1, 1]:
+                new_x, new_y = x + dx, y + 1
+                if 0 <= new_x < width and 0 <= new_y < height:
+                    diagonal_cells.append(self.model.grid[(new_x, new_y)])
+
+        elif current_direction == "Down":
+            # Can move diagonally: down-left or down-right
+            for dx in [-1, 1]:
+                new_x, new_y = x + dx, y - 1
+                if 0 <= new_x < width and 0 <= new_y < height:
+                    diagonal_cells.append(self.model.grid[(new_x, new_y)])
+
+        elif current_direction == "Right":
+            # Can move diagonally: right-up or right-down
+            for dy in [-1, 1]:
+                new_x, new_y = x + 1, y + dy
+                if 0 <= new_x < width and 0 <= new_y < height:
+                    diagonal_cells.append(self.model.grid[(new_x, new_y)])
+
+        elif current_direction == "Left":
+            # Can move diagonally: left-up or left-down
+            for dy in [-1, 1]:
+                new_x, new_y = x - 1, y + dy
+                if 0 <= new_x < width and 0 <= new_y < height:
+                    diagonal_cells.append(self.model.grid[(new_x, new_y)])
+
+        return diagonal_cells
+
     def try_lane_change(self):
-        """Try to change lanes to get closer to destination."""
+        """Try to change lanes to get closer to destination (DIAGONAL ONLY)."""
         desired_direction = self.get_direction_to_destination()
 
-        # Check adjacent cells for a better lane
-        for adj_cell in self.get_adjacent_cells():
+        # Check DIAGONAL cells for a better lane (advance + lane change)
+        for diag_cell in self.get_diagonal_lane_change_cells():
             # Check if we can move to this cell
-            if not self.can_move_to_cell(adj_cell):
+            if not self.can_move_to_cell(diag_cell):
                 continue
 
-            # Check if there's a green light (or no light) in adjacent cell
-            if not self.has_green_light_at_cell(adj_cell):
+            # Check if there's a green light (or no light) in diagonal cell
+            if not self.has_green_light_at_cell(diag_cell):
                 continue
 
             # Check if this cell has a road
             road_dir = None
-            for agent in adj_cell.agents:
+            is_destination = False
+            for agent in diag_cell.agents:
                 if isinstance(agent, Road):
                     road_dir = agent.direction
                     break
+                elif isinstance(agent, Destination):
+                    # Only allow if it's OUR destination
+                    if diag_cell == self.destination:
+                        is_destination = True
+                    break
 
-            # If the adjacent cell's direction is better for reaching destination, change lanes
-            if road_dir == desired_direction:
-                self.cell = adj_cell
-                self.direction = road_dir
+            # If the diagonal cell's direction is better for reaching destination, change lanes
+            if road_dir == desired_direction or is_destination:
+                self.cell = diag_cell
+                if road_dir:
+                    self.direction = road_dir
                 return True
 
         return False
@@ -278,7 +332,7 @@ class Car(CellAgent):
 
     def try_alternative_lane(self):
         """
-        SUBSUMPTION BEHAVIOR: Try to find an alternative lane to avoid traffic.
+        SUBSUMPTION BEHAVIOR: Try to find an alternative lane to avoid traffic (DIAGONAL ONLY).
         This is triggered when the car is stuck.
         """
         if not self.route or len(self.route) == 0:
@@ -288,31 +342,43 @@ class Car(CellAgent):
         if current_direction is None:
             return False
 
-        # Check adjacent cells for an alternative lane
-        for adj_cell in self.get_adjacent_cells():
-            # Calculate the direction of the movement itself
-            movement_direction = self.get_movement_direction(self.cell, adj_cell)
-
-            # CRITICAL: Don't move in opposite direction to current direction
-            if not self.are_directions_compatible(current_direction, movement_direction):
-                continue
-
+        # Check DIAGONAL cells for an alternative lane (advance + lane change)
+        for diag_cell in self.get_diagonal_lane_change_cells():
             # Skip if cell is blocked
-            if not self.can_move_to_cell(adj_cell):
+            if not self.can_move_to_cell(diag_cell):
                 continue
 
-            # Get direction of adjacent cell
-            adj_direction = self.get_next_cell_direction(adj_cell)
+            # Get direction of diagonal cell and check for destinations
+            diag_direction = None
+            is_valid_destination = False
+
+            for agent in diag_cell.agents:
+                if isinstance(agent, Road):
+                    diag_direction = agent.direction
+                    break
+                elif isinstance(agent, Destination):
+                    # Only allow if it's OUR destination
+                    if diag_cell == self.destination:
+                        is_valid_destination = True
+                    else:
+                        # Not our destination, treat as obstacle
+                        diag_direction = None
+                    break
+
+            # Skip if it's a destination that's not ours
+            if not is_valid_destination and diag_direction is None and any(isinstance(a, Destination) for a in diag_cell.agents):
+                continue
 
             # Only change lanes if destination cell direction is compatible
-            if not self.are_directions_compatible(current_direction, adj_direction):
+            if diag_direction and not self.are_directions_compatible(current_direction, diag_direction):
                 continue
 
             # Check if this lane leads closer to destination
-            if adj_direction is not None:
+            if diag_direction is not None or is_valid_destination:
                 # Move to alternative lane
-                self.cell = adj_cell
-                self.direction = adj_direction
+                self.cell = diag_cell
+                if diag_direction:
+                    self.direction = diag_direction
 
                 # Recalculate route from new position
                 self.calculate_route()
@@ -336,6 +402,7 @@ class Car(CellAgent):
         """
         # PRIORITY 1: Goal Achievement - If at destination, remove car
         if self.is_at_destination():
+            self.model.car_reached_destination()  # Update metrics
             self.remove()
             return
 
