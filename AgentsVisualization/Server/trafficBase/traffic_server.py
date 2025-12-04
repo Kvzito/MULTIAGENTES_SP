@@ -263,5 +263,41 @@ def updateModel():
             return jsonify({"message": "Error during step."}), 500
 
 
+@app.route('/getMetrics', methods=['GET'])
+@cross_origin()
+def getMetrics():
+    global cityModel, currentStep
+    if cityModel is None:
+        return jsonify({"message": "Model not initialized"}), 400
+
+    if request.method == 'GET':
+        try:
+            metrics = cityModel.get_metrics()
+            metrics['current_step'] = currentStep
+            metrics['spawn_interval'] = cityModel.spawn_interval
+            return jsonify({'metrics': metrics})
+        except Exception as e:
+            print(e)
+            return jsonify({"message": "Error getting metrics"}), 500
+
+
+@app.route('/setSpawnInterval', methods=['POST'])
+@cross_origin()
+def setSpawnInterval():
+    global cityModel
+    if cityModel is None:
+        return jsonify({"message": "Model not initialized"}), 400
+
+    try:
+        interval = int(request.json.get('spawn_interval', 1))
+        if interval < 1:
+            interval = 1
+        cityModel.spawn_interval = interval
+        return jsonify({'message': f'Spawn interval set to {interval}', 'spawn_interval': interval})
+    except Exception as e:
+        print(e)
+        return jsonify({"message": "Error setting spawn interval"}), 500
+
+
 if __name__ == '__main__':
     app.run(host="localhost", port=8585, debug=True)

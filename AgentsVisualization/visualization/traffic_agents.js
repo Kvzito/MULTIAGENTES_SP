@@ -15,9 +15,9 @@ import { preloadModel } from '../libs/obj_loader.js';
 
 // Comunicacion con la API del servidor
 import {
-    cars, obstacles, trafficLights, roads, destinations,
+    cars, obstacles, trafficLights, roads, destinations, metrics,
     initTrafficModel, update, getCars, getObstacles,
-    getTrafficLights, getRoads, getDestinations
+    getTrafficLights, getRoads, getDestinations, getMetrics, setSpawnInterval
 } from '../libs/api_connection_traffic.js';
 
 // Shaders para iluminacion Phong
@@ -125,10 +125,17 @@ async function main() {
     await getTrafficLights();
     await getRoads();
     await getDestinations();
+    await getMetrics();
 
     setupScene();
     setupObjects(scene, gl, phongProgramInfo);
     setupUI();
+
+    // Actualizar metricas iniciales en la UI
+    if (window.updateMetricsUI) {
+        window.updateMetricsUI();
+    }
+
     drawScene();
 }
 
@@ -489,7 +496,18 @@ function lerpAngle(start, end, t) {
 }
 
 function updateCarRotation(car) {
-    if (car.direction && DIRECTION_ROTATIONS.hasOwnProperty(car.direction)) {
+    // Calcular rotacion basada en el movimiento real, no en la direccion de la calle
+    if (car.oldPosArray && car.posArray) {
+        const dx = car.posArray[0] - car.oldPosArray[0];
+        const dz = car.posArray[2] - car.oldPosArray[2];
+
+        // Solo actualizar si hay movimiento significativo
+        if (Math.abs(dx) > 0.01 || Math.abs(dz) > 0.01) {
+            // Calcular angulo basado en la direccion del movimiento
+            car.targetRotY = Math.atan2(dx, dz);
+        }
+    } else if (car.direction && DIRECTION_ROTATIONS.hasOwnProperty(car.direction)) {
+        // Fallback para carros nuevos sin posicion anterior
         car.targetRotY = DIRECTION_ROTATIONS[car.direction];
     }
 }
@@ -660,6 +678,10 @@ async function drawScene() {
         await update();
         updateCars();
         updateTrafficLightSpheres();
+        // Actualizar metricas en la UI
+        if (window.updateMetricsUI) {
+            window.updateMetricsUI();
+        }
     }
 
     requestAnimationFrame(drawScene);
@@ -684,6 +706,49 @@ function setupViewProjection(gl) {
 // Controles de camara con lil-gui
 function setupUI() {
     const gui = new GUI();
+
+    // Panel de Metricas de Simulacion
+    const metricsFolder = gui.addFolder('Metricas de Simulacion');
+
+    const metricsDisplay = {
+        step: 0,
+        spawned: 0,
+        arrived: 0,
+        active: 0
+    };
+
+    // Controladores para mostrar los valores (solo lectura)
+    metricsFolder.add(metricsDisplay, 'step')
+        .name('Paso Actual')
+        .listen()
+        .disable();
+
+    metricsFolder.add(metricsDisplay, 'spawned')
+        .name('Total Spawneados')
+        .listen()
+        .disable();
+
+    metricsFolder.add(metricsDisplay, 'arrived')
+        .name('Llegaron a Destino')
+        .listen()
+        .disable();
+
+    metricsFolder.add(metricsDisplay, 'active')
+        .name('Carros Activos')
+        .listen()
+        .disable();
+
+    metricsFolder.open();
+
+    // Funcion para actualizar metricas en el UI
+    window.updateMetricsUI = () => {
+        metricsDisplay.step = metrics.current_step;
+        metricsDisplay.spawned = metrics.total_spawned;
+        metricsDisplay.arrived = metrics.total_reached_destination;
+        metricsDisplay.active = metrics.current_active_cars;
+    };
+
+    // Controles de Camara
     const cameraFolder = gui.addFolder('Controles de Camara');
 
     const cameraSettings = {
@@ -718,7 +783,7 @@ function setupUI() {
         .onChange(updateCamera);
 
     cameraFolder.add(cameraSettings, 'azimuth', 0, Math.PI * 2, 0.1)
-        .name('A z ')
+        .name('Azimut')
         .onChange(updateCamera);
 
     cameraFolder.add(cameraSettings, 'elevation', 0, Math.PI / 2, 0.1)
