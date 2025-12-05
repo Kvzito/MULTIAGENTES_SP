@@ -504,11 +504,12 @@ function updateCarRotation(car) {
         // Solo actualizar si hay movimiento significativo
         if (Math.abs(dx) > 0.01 || Math.abs(dz) > 0.01) {
             // Calcular angulo basado en la direccion del movimiento
-            car.targetRotY = Math.atan2(dx, dz);
+            // Sumamos PI para voltear el carro 180 grados (que mire hacia adelante)
+            car.targetRotY = Math.atan2(dx, dz) + Math.PI;
         }
     } else if (car.direction && DIRECTION_ROTATIONS.hasOwnProperty(car.direction)) {
         // Fallback para carros nuevos sin posicion anterior
-        car.targetRotY = DIRECTION_ROTATIONS[car.direction];
+        car.targetRotY = DIRECTION_ROTATIONS[car.direction] + Math.PI;
     }
 }
 
