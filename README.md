@@ -16,6 +16,18 @@ _______________________
 
 ## CÓMO CORRER EL PROYECTO
 
+### 0. Instalar dependencias de Python
+
+Si es la primera vez que corres el proyecto, necesitas instalar las dependencias de Python:
+
+```bash
+# Activar el entorno virtual
+.\.agents\Scripts\Activate
+
+# Instalar las dependencias necesarias
+pip install -U "mesa[all]" flask flask-cors
+```
+
 ### 1. Inicializar el servidor de Python
 
 Abre una terminal en la raíz del repositorio y ejecuta los siguientes comandos:
